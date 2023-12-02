@@ -54,7 +54,7 @@ procedure December_01 is
          Last := 0;
          for D in Decimal_Characters loop
             if Index (Text, To_String (Name_Table (D)), Backward) > Last then
-               Last := Index (Text, To_String (Name_Table (D)));
+               Last := Index (Text, To_String (Name_Table (D)), Backward);
                Decimal_Character := D;
             end if; -- Index (Text, To_String (Name_Table (D)) Backward) > ...
          end Loop; -- D in Decimal_Characters
@@ -76,7 +76,6 @@ procedure December_01 is
       Clear (Two_Digit_Store);
       while not End_Of_File (Input_File) loop
          Get_Line (Input_File, Text);
-         Put_Line (Text);
          Start_At := 1;
          Find_Token (Text, Decimal_Digit_Set, Start_At, Inside, First, Last);
          Start_At := Last + 1;
@@ -91,11 +90,9 @@ procedure December_01 is
             exit when Last = 0;
             Digit_Last := Last;
             Start_At := Last + 1;
-         end loop; -- Search Again
-         Put_Line (Digit_First'Img & Digit_Last'Img);
+         end loop; -- Search Again;
          Spelt_First (Text, First, First_Spelt);
          Spelt_Last (Text, Last, Last_Spelt);
-         Put_Line (First'Img & " " & First_Spelt & Last'Img & " " & Last_Spelt);
          if Part_Two and First < Digit_First then
             Two_Digit_String (1) := First_Spelt;
          elsif Digit_First <= Length (Text) then
@@ -112,7 +109,6 @@ procedure December_01 is
             -- required to run second example for part 1
             Two_Digit_String (2) := '0';
          end if; -- Part_Two and Last > Digit_Last
-         Put_Line (Two_Digit_String);
          append (Two_Digit_Store, Two_Digits'Value (Two_Digit_String));
       end loop; -- not End_Of_File (Input_File)
       Close (Input_File);
