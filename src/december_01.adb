@@ -22,43 +22,37 @@ procedure December_01 is
    procedure Read_input (Two_Digit_Store : out Two_Digit_stores.List;
                          Part_Two : Boolean := False) is
 
-      Name_Table : constant Name_Tables :=
-        (To_Unbounded_String ("one"), To_Unbounded_String ("two"),
-         To_Unbounded_String ("three"), To_Unbounded_String ("four"),
-         To_Unbounded_String ("five"), To_Unbounded_String ("six"),
-         To_Unbounded_String ("seven"), To_Unbounded_String ("eight"),
-         To_Unbounded_String ("nine"));
+      procedure Spelt (Text : in Unbounded_String;
+                       First : out Positive;
+                       First_Character : out Decimal_Characters;
+                       Last : out Natural;
+                       Last_Character : out Decimal_Characters) is
 
-      procedure Spelt_First (Text : in Unbounded_String;
-                             First : out Positive;
-                             Decimal_Character : out Decimal_Characters) is
+         Name_Table : constant Name_Tables :=
+           (To_Unbounded_String ("one"), To_Unbounded_String ("two"),
+            To_Unbounded_String ("three"), To_Unbounded_String ("four"),
+            To_Unbounded_String ("five"), To_Unbounded_String ("six"),
+            To_Unbounded_String ("seven"), To_Unbounded_String ("eight"),
+            To_Unbounded_String ("nine"));
 
       begin -- Spelt_First
          -- Return value if none found;
          First := Length (Text) + 1;
-         Decimal_Character := Decimal_Characters'First;
+         First_Character := Decimal_Characters'First;
+         Last := 0;
+         Last_Character := Decimal_Characters'First;
          for D in Decimal_Characters loop
             if Index (Text, To_String (Name_Table (D))) > 0 and then
               Index (Text, To_String (Name_Table (D))) < First then
                First := Index (Text, To_String (Name_Table (D)));
-               Decimal_Character := D;
+               First_Character := D;
             end if; -- Index (Text, To_String (Name_Table (D))) > 0 and then ...
-         end Loop; -- D in Decimal_Characters
-      end Spelt_First;
-
-      procedure Spelt_Last (Text : in Unbounded_String;
-                            Last : out Natural;
-                            Decimal_Character : out Decimal_Characters) is
-
-      begin -- Spelt_Last
-         Last := 0;
-         for D in Decimal_Characters loop
             if Index (Text, To_String (Name_Table (D)), Backward) > Last then
                Last := Index (Text, To_String (Name_Table (D)), Backward);
-               Decimal_Character := D;
+               Last_Character := D;
             end if; -- Index (Text, To_String (Name_Table (D)) Backward) > ...
          end Loop; -- D in Decimal_Characters
-      end Spelt_Last;
+      end Spelt;
 
       Input_File : File_Type;
       Text : Unbounded_String;
@@ -91,8 +85,7 @@ procedure December_01 is
             Digit_Last := Last;
             Start_At := Last + 1;
          end loop; -- Search Again;
-         Spelt_First (Text, First, First_Spelt);
-         Spelt_Last (Text, Last, Last_Spelt);
+         Spelt (Text, First, First_Spelt, Last, Last_Spelt);
          if Part_Two and First < Digit_First then
             Two_Digit_String (1) := First_Spelt;
          elsif Digit_First <= Length (Text) then
