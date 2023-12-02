@@ -56,9 +56,7 @@ procedure December_02 is
               " expected ':' and found '" & Element (Text, Start_At) & "'";
          end if; -- Element (Text, Start_At) /= ':'
          loop -- Read one Game
-            for C in Colours loop
-               Sub_Game (C) := 0;
-            end loop; -- C in Colours
+            Sub_Game := (0, 0, 0);
             loop -- Read one Sub_Game
                Find_Token (Text, Decimal_Digit_Set, Start_At, inside, First,
                            Last);
