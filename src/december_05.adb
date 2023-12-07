@@ -140,13 +140,14 @@ procedure December_05 is
       return Result;
    end Seed_to_Location;
 
-   Seed_List, Location_List : Property_Lists.List;
+   Seed_List : Property_Lists.List;
    Property_Map : Property_Maps.Map;
-   Least : Property_Values := Property_Values'Last;
+   Least : Property_Values;
+   Sc : Property_Lists.Cursor;
 
 begin -- December_05
    Read_input (Seed_List, Property_Map);
-   Clear (Location_List);
+   Least := Property_Values'Last;
    for S in Iterate (Seed_List) loop
       if Seed_to_Location (Property_Map, Element (S)) < Least then
          Least := Seed_to_Location (Property_Map, Element (S));
@@ -154,6 +155,18 @@ begin -- December_05
    end loop; -- S in Iterate (Seed_List)
    Put_Line ("Part one:" & Least'Img);
    DJH.Execution_Time.Put_CPU_Time;
+   Sc := First (Seed_List);
+   Least := Property_Values'Last;
+   while Sc /= Property_Lists.No_Element loop
+      for S in Property_Values Range Seed_List (Sc) ..
+        Seed_List (Sc) + Seed_List (Next(Sc)) - 1 loop
+         if Seed_to_Location (Property_Map, S) < Least then
+            Least := Seed_to_Location (Property_Map, S);
+         end if; -- Seed_to_Location (Property_Map, S) < Least
+      end loop; -- S in Property_Values Range Seed_List (Sc) ...
+      Next (Sc);
+      Next (Sc);
+   end loop; -- Sc /= Property_Lists.No_Element
    Put_Line ("Part two:" & Least'Img);
    DJH.Execution_Time.Put_CPU_Time;
 end December_05;
