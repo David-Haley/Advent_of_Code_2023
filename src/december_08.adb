@@ -19,9 +19,11 @@ procedure December_08 is
    package Networks is new Ada.Containers.Ordered_Maps (Node_Names, Nodes);
    use Networks;
 
-   package Node_Maps is new
-     Ada.Containers.Ordered_Maps (Node_Names, Node_Names);
-   use Node_Maps;
+   package Path_Lengths is new
+     Ada.Containers.Ordered_Maps (Node_Names, Positive);
+   use Path_Lengths;
+
+   subtype Long_Positive is Long_Long_Integer range 1 .. Long_Long_Integer'Last;
 
    procedure Read_input (Instruction : out Unbounded_String;
                          Network : out Networks.Map) is
@@ -59,17 +61,17 @@ procedure December_08 is
    end Read_input;
 
    function Steps (Instruction : in Unbounded_String;
-                   Network : in Networks.Map) return Positive is
+                   Network : in Networks.Map;
+                   Start : in Node_Names) return Positive is
 
       Steps : Natural := 0;
-      Next_Node : Node_Names := "AAA";
-      End_Node : constant Node_Names := "ZZZ";
       subtype Instruction_Indices is Positive range 1 ..
         Length (Instruction);
       Next_Instruction : Instruction_Indices := Instruction_Indices'First;
+      Next_Node : Node_Names := Start;
 
    begin -- Steps
-      while Next_Node /= End_Node loop
+      while Next_Node (3) /= 'Z' loop
          case Element (Instruction, Next_Instruction) is
             when 'L' =>
                Next_Node := Network (Next_Node).Left;
@@ -90,57 +92,57 @@ procedure December_08 is
    end Steps;
 
    function Steps_2 (Instruction : in Unbounded_String;
-                   Network : in Networks.Map) return Positive is
+                     Network : in Networks.Map) return Long_Positive is
 
-      function All_Zs (Next_Node : Node_Maps.Map) return Boolean is
+      function LCM (Path_Length : in Path_Lengths.Map) return Long_Positive is
 
-         Result : Boolean := True;
+         subtype Table_Indces is Positive range
+           1 .. Positive (Length (Path_Length));
+         type Table_Element is record
+            X, Xm : Long_Positive;
+         end record; -- Table_Element
+         type Tables is array (Table_Indces) of Table_Element;
+         Table : Tables;
+         Least, Result : Long_Positive;
+         Least_Index : Table_Indces;
+         All_Equal : Boolean;
+         I : Positive := 1;
 
-      begin -- All_Zs
-         for N in Iterate (Next_Node) loop
-            Result := Result and Next_Node (N) (3) = 'Z';
-         end loop; -- N in Iterate (Next_Node)
+      begin -- LCM
+         for P in Iterate (Path_Length) loop
+            Table (I).X := Long_Positive (Element (P));
+            Table (I).Xm := Long_Positive (Element (P));
+            I := I + 1;
+         end loop; -- P in Iterate (Path_Length)
+         loop -- Step LCM
+            All_Equal := True;
+            Least := Long_Positive'Last;
+            Result := Table (Table_Indces'First).Xm;
+            for T in Table_Indces loop
+               if Least > Table (T).Xm then
+                  Least := Table (T).Xm;
+                  Least_Index := T;
+               end if; -- Least > Table (T).Xm
+               All_Equal := All_Equal and Result = Table (T).Xm;
+            end loop; -- T in Table_Indces
+            exit when All_Equal;
+            Table (Least_Index).Xm :=
+              Table (Least_Index).Xm + Table (Least_Index).X;
+         end loop; -- Step LCM
          return Result;
-      end All_Zs;
+      end LCM;
 
-      Steps : Natural := 0;
-      subtype Instruction_Indices is Positive range 1 ..
-        Length (Instruction);
-      Next_Instruction : Instruction_Indices := Instruction_Indices'First;
-      Next_Node : Node_Maps.Map;
+      Path_Length : Path_Lengths.Map;
 
    begin -- Steps_2
-      Clear (Next_Node);
+      Path_Lengths.Clear (Path_Length);
       for N in Iterate (Network) loop
          if Key (N) (3) = 'A' then
-            Include (Next_Node, Key (N), Key (N));
+            include (Path_Length, Key (N),
+                     Steps (Instruction, Network, Key (N)));
          end if; -- Key (N) (3) = 'A'
       end loop; -- N in Iterate (Network)
-
-      for N in Iterate (Next_Node) loop
-        Put_Line (Key (N) & ": " & Element (N));
-      end loop;
-
-      while not All_Zs (Next_Node) loop
-         for N in Iterate (Next_Node) loop
-            case Element (Instruction, Next_Instruction) is
-            when 'L' =>
-               Next_Node (N) := Network (Next_Node (N)).Left;
-            when 'R' =>
-               Next_Node (N) := Network (Next_Node (N)).Right;
-            when others =>
-               raise Program_Error with "Expected 'L' or 'R' and found '" &
-                 Element (Instruction, Next_Instruction) & "'";
-            end case; -- Element (Instruction, Next_Instruction)
-         end loop; -- N in Iterate (Next_Node);
-         Steps := Steps + 1;
-         if Next_Instruction < Instruction_Indices'Last then
-            Next_Instruction := Next_Instruction + 1;
-         else
-            Next_Instruction := Instruction_Indices'First;
-         end if; -- Next_Instruction < Instruction_Indices'Last
-      end loop; -- Next_Node /= End_Node
-      return Steps;
+      Return LCM (Path_Length);
    end Steps_2;
 
    Instruction : Unbounded_String;
@@ -148,8 +150,8 @@ procedure December_08 is
 
 begin -- December_08
    Read_input (Instruction, Network);
-   --  Put_Line ("Part one:" & Steps (Instruction, Network)'Img);
-   --  DJH.Execution_Time.Put_CPU_Time;
+   Put_Line ("Part one:" & Steps (Instruction, Network, "AAA")'Img);
+   DJH.Execution_Time.Put_CPU_Time;
    Put_Line ("Part two:" & Steps_2 (Instruction, Network)'Img);
    DJH.Execution_Time.Put_CPU_Time;
 end December_08;
