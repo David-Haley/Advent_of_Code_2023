@@ -29,7 +29,7 @@ procedure December_07 is
    subtype Hands is String (Card_Indices);
 
    type Player_States is record
-      Hand, Modified_Hand : Hands;
+      Hand, Part_2, Modified_Hand : Hands;
       Bid : Positive;
       Hand_Type : Hand_Types := High_card;
    end record; -- Player_States
@@ -59,6 +59,28 @@ procedure December_07 is
    package Part_1_Sort is new
      Game_Stores.Generic_Sorting ("<" => Part_1_Less_Than);
 
+   function Part_2_Less_Than (Left, Right : Player_States) return Boolean is
+
+      Result, Decided : Boolean;
+      C : Card_Indices := Card_Indices'First;
+
+   begin -- Part_2_Less_Than
+      if Left.Hand_Type = Right.Hand_Type then
+         loop -- check one card
+            Decided := Left.Part_2 (C) /= Right.Part_2 (C);
+            Result := Left.Part_2 (C) < Right.Part_2 (C);
+            exit when Decided or C = Card_Indices'Last;
+            C := C + 1;
+         end loop; -- check one card
+      else
+         Result := Left.Hand_Type < Right.Hand_Type;
+      end if; -- Left.Hand_Type = Right.Hand_Type
+      return Result;
+   end Part_2_Less_Than;
+
+   package Part_2_Sort is new
+     Game_Stores.Generic_Sorting ("<" => Part_2_Less_Than);
+
    procedure Read_Input (Game_Store : out Game_Stores.Vector) is
 
       Input_File : File_Type;
@@ -80,9 +102,10 @@ procedure December_07 is
          Player_State.Hand :=
            To_String (Translate (Unbounded_Slice (Text, Card_Indices'First,
                       Card_Indices'Last), Part_1_Mapping));
-         Player_State.Modified_Hand :=
+         Player_State.Part_2 :=
            To_String (Translate (Unbounded_Slice (Text, Card_Indices'First,
                       Card_Indices'Last), Part_2_Mapping));
+         Player_State.Modified_Hand := Player_State.Part_2;
          Find_Token (Text, Decimal_Digit_Set, Start_At, Inside, First, Last);
          Player_State.Bid := Positive'Value (Slice (Text, First, Last));
          Append (Game_Store, Player_State);
@@ -90,30 +113,17 @@ procedure December_07 is
       Close (Input_File);
    end Read_input;
 
-   procedure Build (Player_State : in Player_States;
-                    Hystogram : out Hystograms) is
+   procedure Build (Hand : in Hands; Hystogram : out Hystograms) is
 
    begin -- Build
       Hystogram := (others => 0);
       for C in Card_Indices loop
-         Hystogram (Player_State.Hand (C)) :=
-           Hystogram (Player_State.Hand (C)) + 1;
+         Hystogram (Hand (C)) :=
+           Hystogram (Hand (C)) + 1;
       end loop; -- C in Card_Indices
    end Build;
 
    procedure Characterise (Game_Store : in out Game_Stores.Vector) is
-
-      type Hystograms is array (Value_Indices) of Natural;
-
-      procedure Build (Hand : in Hands; Hystogram : out Hystograms) is
-
-      begin -- Build
-         Hystogram := (others => 0);
-         for C in Card_Indices loop
-            Hystogram (Hand (C)) :=
-              Hystogram (Hand (C)) + 1;
-         end loop; -- C in Card_Indices
-      end Build;
 
       subtype Pair_Counts is Natural range 0 .. 2;
 
@@ -186,18 +196,17 @@ procedure December_07 is
          return V;
       end Card_of_Count;
 
-      function Not_Wild (Hand : in Hands) return Card_Indices
-
       Hystogram : Hystograms;
-      Wild_Index Not_Wile_Index : Card_Indices;
+      Wild_Index, Not_Wild_Index : Card_Indices;
       Wild_Found, Not_Wild_Found : Boolean;
 
    begin -- Upgrade_Hand
       for G in Iterate (Game_Store) loop
          Build (Game_Store (G).Modified_Hand, Hystogram);
          while Hystogram (Wild_Card) > 0 and
-           not Game_Store (G).Modified_Hand_Type = Five_of_a_kind loop
+           not (Game_Store (G).Hand_Type = Five_of_a_kind) loop
             Wild_Found := False;
+            Not_Wild_Found := False;
             for C in Card_Indices loop
                if not Wild_Found and Game_Store (G).Modified_Hand (C) =
                  Wild_Card then
@@ -240,7 +249,7 @@ procedure December_07 is
                   else
                      Game_Store (G).Modified_Hand (Wild_Index) :=
                        Card_of_Count (Hystogram, 3);
-                     Game_Store (G).Hand_Type := Four_of_a_kind
+                     Game_Store (G).Hand_Type := Four_of_a_kind;
                   end if; -- Card_of_Count (Hystogram, 3) = Wild_Card
                when Two_pair =>
                   if Card_of_Count (Hystogram, 1) = Wild_Card then
@@ -248,9 +257,24 @@ procedure December_07 is
                        Card_of_Count (Hystogram, 2);
                      Game_Store (G).Hand_Type := Full_house;
                   else
-
+                     Game_Store (G).Modified_Hand (Wild_Index) :=
+                       Card_of_Count (Hystogram, 1);
+                     -- no change to Hand_Type
+                  end if; -- Card_of_Count (Hystogram, 1) = Wild_Card
+               when One_pair =>
+                  if Card_of_Count (Hystogram, 2) = Wild_Card then
+                     Game_Store (G).Modified_Hand (Wild_Index) :=
+                       Card_of_Count (Hystogram, 1);
+                  else
+                     Game_Store (G).Modified_Hand (Wild_Index) :=
+                       Game_Store (G).Modified_Hand (Not_Wild_Index);
+                  end if; -- Card_of_Count (Hystogram, 2) = Wild_Card
+                  -- no change to Hand_Type
+               when High_card =>Game_Store (G).Modified_Hand (Wild_Index) :=
+                    Game_Store (G).Modified_Hand (Not_Wild_Index);
+                  Game_Store (G).Hand_Type := One_Pair;
             end case; -- Game_Store (G).Modified_Hand_Type
-            Build (Game_Store (G), Hystogram);
+            Build (Game_Store (G).Modified_Hand, Hystogram);
          end loop; -- Hystogram (Wild_Card) > 0
       end loop; -- G in Iterate (Game_Store)
    end Upgrade_Hand;
@@ -267,6 +291,13 @@ begin -- December_07
    end loop; -- G in Positive range 1 .. Last_Index (Game_Store)
    Put_Line ("Part one:" & Sum'Img);
    DJH.Execution_Time.Put_CPU_Time;
-   Put_Line ("Part two:");
+   Sum := 0;
+   Upgrade_Hand (Game_Store);
+   Part_2_Sort.Sort (Game_Store);
+   for G in Positive range 1 .. Last_Index (Game_Store) loop
+      Sum := Sum + Game_Store (G).Bid * G;
+      Put_Line (Player_States'Image (Game_Store (G)));
+   end loop; -- G in Positive range 1 .. Last_Index (Game_Store)
+   Put_Line ("Part two:" & Sum'Img);
    DJH.Execution_Time.Put_CPU_Time;
 end December_07;
