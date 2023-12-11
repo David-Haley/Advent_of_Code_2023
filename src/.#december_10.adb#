@@ -226,6 +226,7 @@ procedure December_10 is
       -- Does not count for "Inside" condition properly, need to consider case
       -- row where enterence and exit are in the same direction and not count
       -- twice.
+      -- Alternatively for every element
 
       X_Low, Y_Low : Ordinates := Ordinates'Last;
       X_High, Y_High : Ordinates := Ordinates'First;
