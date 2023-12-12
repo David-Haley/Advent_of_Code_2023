@@ -126,6 +126,8 @@ procedure December_10 is
                           Start : in Coordinates;
                           Loop_Map : out Pipes.Map) is
 
+      -- Has the side effect of creating a map of the loop
+
       procedure Update (State : in States;
                         Loop_Map : in out Pipes.Map) is
 
@@ -223,16 +225,18 @@ procedure December_10 is
    function Inside_Count (Pipe : in Pipes.map;
                           Loop_Map : in Pipes.Map) return Natural is
 
-      -- Does not count for "Inside" condition properly, need to consider case
-      -- row where enterence and exit are in the same direction and not count
-      -- twice.
+      -- To be inside loop, the count of crossings of the loop in a row has to
+      -- be odd.
 
       X_Low, Y_Low : Ordinates := Ordinates'Last;
       X_High, Y_High : Ordinates := Ordinates'First;
       Count : Natural := 0;
       Edge_Count : integer;
+      In_Loop : Boolean;
+      Previous_NS : Directions;
 
    begin -- Inside_Count
+      -- Only consider the bounding box of the loop
       for L in Iterate (Loop_Map) loop
          if X_Low > Key (L).X then
             X_Low := Key (L).X;
@@ -248,35 +252,43 @@ procedure December_10 is
          end if; -- X_High < Key (L).Y
       end loop; -- L in Iterate (Loop_Map)
       for Y in Ordinates range Y_Low .. Y_High loop
-         for X in Ordinates range X_Low .. X_High loop
-            if Contains (Loop_Map, (X, Y)) then
-               if Loop_Map ((X, Y)) (North) then
-                  Put ('N');
-               elsif Loop_Map ((X, Y)) (South) then
-                  Put ('S');
-               elsif Loop_Map ((X, Y)) (East) or  Loop_Map ((X, Y)) (West) then
-                  Put ('-');
-               end if; -- Pipe ((X, Y)) (North)
-            else
-               Put ('.');
-            end if; -- Loop_Map ((X, Y)) (North)
-         end loop; -- X in Ordinates range X_Low .. X_High
-         New_Line;
-      end loop; -- Y in Ordinates range Y_Low .. Y_High
-      for Y in Ordinates range Y_Low .. Y_High loop
          Edge_Count := 0;
+         Previous_NS := East; -- has to be anything other than North or South
+         In_Loop := False;
          for X in Ordinates range X_Low .. X_High loop
             if Contains (Loop_Map, (X, Y)) then
-               if Loop_Map ((X, Y)) (North) then
+               -- Don't count twice for entrances and exits from a row in the
+               -- same direction
+               if Loop_Map ((X, Y)) (North) and
+                 not (Previous_NS = North and In_Loop) then
                   Edge_Count := Edge_Count + 1;
-               elsif Loop_Map ((X, Y)) (South) then
+               elsif Loop_Map ((X, Y)) (South) and
+                 not (Previous_NS = South and In_Loop) then
                   Edge_Count := Edge_Count - 1;
                end if; -- Pipe ((X, Y)) (North)
+               -- Set In_loop False if the row has been exited in the same
+               -- direction as it was entered
+               if In_Loop and then
+                 ((Loop_Map ((X, Y)) (North) and Previous_NS = North) or
+                    (Loop_Map ((X, Y)) (South) and Previous_NS = South)) then
+                  In_Loop := False;
+                  Previous_NS := East;
+                  -- Anything other than North or South but it may not be
+                  -- essential to make it invalid here;
+               end if; -- In_Loop and then
+               -- In_Loop becomes true when a bend is in the current row and
+                       -- remains true whilst there is a connection in that row.
+               In_Loop := (In_loop or Loop_Map ((X, Y)) (North) or
+                             Loop_Map ((X, Y)) (South)) and
+                 (Loop_Map ((X, Y)) (East) or Loop_Map ((X, Y)) (West));
+               if Loop_Map ((X, Y)) (North) then
+                  Previous_NS := North;
+               elsif Loop_Map ((X, Y)) (South) then
+                  Previous_NS := South;
+               end if; -- Loop_Map ((X, Y)) (North)
             end if; -- Contains (Loop_Map, (X, Y))
-            Put_Line (X'Img & Y'Img & Edge_Count'Image);
             if Edge_Count mod 2 = 1 and not Contains (Loop_Map, (X, Y)) then
                Count := Count + 1;
-               Put_Line (X'Img & Y'Img & " Count" & Count'Img);
             end if; -- Edge_Count mod 2 = 1 and not Contains (Loop_Map, (X, Y))
          end loop; -- X in Ordinates range X_Low .. X_High
       end loop; -- Y in Ordinates range Y_Low .. Y_High
