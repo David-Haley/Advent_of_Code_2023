@@ -222,6 +222,9 @@ procedure December_07 is
             case Game_Store (G).Hand_Type is
                when Five_of_a_kind =>
                   Null;
+                  -- Just here to keep the compiler happy that the case list is
+                  -- exhaustive, the while means that this is unreachable code
+                  -- which is not detected by the compiler.
                when Four_of_a_kind =>
                   if Card_of_Count (Hystogram, 1) = Wild_Card then
                      Game_Store (G).Modified_Hand (Wild_Index) :=
@@ -236,11 +239,12 @@ procedure December_07 is
                   if Card_of_Count (Hystogram, 3) = Wild_Card then
                      Game_Store (G).Modified_Hand (Wild_Index) :=
                        Card_of_Count (Hystogram, 2);
+                     -- no change to Hand_Type
                   else
                      Game_Store (G).Modified_Hand (Wild_Index) :=
                        Card_of_Count (Hystogram, 3);
+                     Game_Store (G).Hand_Type := Four_of_a_kind;
                   end if; -- Card_of_Count (Hystogram, 3) = Wild_Card
-                  -- no change to Hand_Type
                when Three_of_a_kind =>
                   if Card_of_Count (Hystogram, 3) = Wild_Card then
                      Game_Store (G).Modified_Hand (Wild_Index) :=
@@ -257,19 +261,26 @@ procedure December_07 is
                        Card_of_Count (Hystogram, 2);
                      Game_Store (G).Hand_Type := Full_house;
                   else
-                     Game_Store (G).Modified_Hand (Wild_Index) :=
-                       Card_of_Count (Hystogram, 1);
-                     -- no change to Hand_Type
+                     for C in Card_Indices loop
+                        if Game_Store (G).Modified_Hand (C) /= Wild_Card and
+                          Hystogram (Game_Store (G).Modified_Hand (C)) = 2
+                        then
+                           Game_Store (G).Modified_Hand (Wild_Index) :=
+                             Game_Store (G).Modified_Hand (C);
+                           Game_Store (G).Hand_Type := Three_of_a_kind;
+                        end if; -- Game_Store (G).Modified_Hand (C) /= ...
+                     end loop; -- C in Card_Indices
                   end if; -- Card_of_Count (Hystogram, 1) = Wild_Card
                when One_pair =>
                   if Card_of_Count (Hystogram, 2) = Wild_Card then
                      Game_Store (G).Modified_Hand (Wild_Index) :=
                        Card_of_Count (Hystogram, 1);
+                     -- no change to Hand_Type
                   else
                      Game_Store (G).Modified_Hand (Wild_Index) :=
-                       Game_Store (G).Modified_Hand (Not_Wild_Index);
+                       Card_of_Count (Hystogram, 2);
+                     Game_Store (G).Hand_Type := Three_of_a_kind;
                   end if; -- Card_of_Count (Hystogram, 2) = Wild_Card
-                  -- no change to Hand_Type
                when High_card =>Game_Store (G).Modified_Hand (Wild_Index) :=
                     Game_Store (G).Modified_Hand (Not_Wild_Index);
                   Game_Store (G).Hand_Type := One_Pair;
@@ -287,7 +298,7 @@ begin -- December_07
    Characterise (Game_Store);
    Part_1_Sort.Sort (Game_Store);
    for G in Positive range 1 .. Last_Index (Game_Store) loop
-      Sum := Sum + Game_Store (G).Bid * G;
+      Sum := @ + Game_Store (G).Bid * G;
    end loop; -- G in Positive range 1 .. Last_Index (Game_Store)
    Put_Line ("Part one:" & Sum'Img);
    DJH.Execution_Time.Put_CPU_Time;
@@ -295,8 +306,7 @@ begin -- December_07
    Upgrade_Hand (Game_Store);
    Part_2_Sort.Sort (Game_Store);
    for G in Positive range 1 .. Last_Index (Game_Store) loop
-      Sum := Sum + Game_Store (G).Bid * G;
-      Put_Line (Player_States'Image (Game_Store (G)));
+      Sum := @ + Game_Store (G).Bid * G;
    end loop; -- G in Positive range 1 .. Last_Index (Game_Store)
    Put_Line ("Part two:" & Sum'Img);
    DJH.Execution_Time.Put_CPU_Time;
