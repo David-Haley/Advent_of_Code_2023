@@ -31,8 +31,9 @@ procedure December_14 is
    type Directions is (North, West, South, East);
 
    package Round_Sets is new Ada.Containers.Ordered_Sets (Coordinates);
+   use Round_Sets;
 
-   subtype Cycles is Natural range Natural'First .. 1000000000;
+   subtype Cycles is Positive range Positive'First .. 1000000000;
 
    package Cycle_Maps is new
      Ada.Containers.Ordered_Maps (Cycles, Round_Sets.Set);
@@ -159,66 +160,77 @@ procedure December_14 is
       end case; -- Direction
    end Tilt;
 
-   function Load (Rock_Store : in Rock_Stores.Map;
+   function Load (Round_Set : in Round_Sets.Set;
                   Y_High : in Ordinates) return Positive is
 
       Result : Natural := 0;
 
    begin -- Load
-      for R in Iterate (Rock_Store) loop
-         if Element (R) = Round then
-            Result := @ + Y_High - Key (R).Y + 1;
-         end if; --  Element (R) = Round
-      end loop; -- R in Iterate (Rock_Store)
+      for R in Iterate (Round_Set) loop
+         Result := @ + Y_High - Element (R).Y + 1;
+      end loop; --  R in Iterate (Round_Sets)
       return Result;
    end Load;
 
+   function Build_Round_Set (Rock_Store : in Rock_Stores.Map)
+                                   return Round_Sets.Set is
+
+      Result : Round_Sets.Set := Round_Sets.Empty_Set;
+
+   begin -- Build_Round_Set
+      for R in Iterate (Rock_Store) loop
+         if Element (R) = Round then
+            Insert (Result, Key (R));
+         end if; -- Element (R) = Round
+      end loop; -- Element (R) = Round
+      return Result;
+   end Build_Round_Set;
+
    function Spin_Cycle (Rock_Store : in out Rock_Stores.Map;
-                        Y_High : in Ordinates) return Positive is
+                        X_High, Y_High : in Ordinates) return Positive is
 
       -- Has side effect of modifying Rock Store
 
-      use Round_Sets;
       use Cycle_Maps;
 
-      function Build_Round_Set (Rock_Store : in Rock_Stores.Map)
-                                return Round_Sets.Set is
+      procedure Repeated (Rock_Store : in Rock_Stores.Map;
+                          Cycle : in Cycles;
+                          Cycle_Map : in out Cycle_Maps.Map;
+                          Repeat : out Boolean;
+                          First_Instance : Out Cycles) is
 
-         Result : Round_Sets.Set := Round_Sets.Empty_Set;
-
-      begin -- Build_Round_Set
-         for R in Iterate (Rock_Store) loop
-            if Element (R) = Round then
-               Insert (Result, Key (R));
-            end if; -- Element (R) = Round
-         end loop; -- Element (R) = Round
-         return Result;
-      end Build_Round_Set;
-
-      function Repeated (Cycle_Map : in out Cycle_Maps;
-                         Cycle : in Cycles;
-                         Round_Set : in Round_Sets) return Boolean is
-
-         -- Has side effect of updating Cycle_Map
-
-         Repeat : Boolean;
          Cc : Cycle_Maps.Cursor := First (Cycle_Map);
+         Current_Set : Round_Sets.Set := Build_Round_Set (Rock_Store);
 
       begin -- Repeated
-         loop -- compare with all previous results
-            Repeat : Elemen (Cc) = Round_Set;
-            exit when Repeat;
+         Repeat := False;
+         while Cc /= Cycle_Maps.No_Element loop
+            Repeat := Element (Cc) = Current_Set;
+            First_Instance := Key (Cc);
             Next (Cc);
-         end loop -- compare with all previous results
-         Insert (Cycle_Map, Cycle, Round_Set);
-         return Repeat;
+         end loop; -- Cc /= Cycle_Maps.Noelement
+         Insert (Cycle_Map, Cycle, Current_Set);
       end Repeated;
 
-      Cycle : Cycles := Cycles'Last;
+      Cycle : Cycles := Cycles'First;
+      Cycle_Map : Cycle_Maps.Map := Cycle_Maps.Empty_Map;
+      Repeat : Boolean;
+      First_Instance, Required_Cycle : Cycles;
 
    begin -- Spin_Cycle
       loop -- One Spin
-      end loop;
+         Tilt (Rock_Store, North, X_High, Y_High);
+         Tilt (Rock_Store, West, X_High, Y_High);
+         Tilt (Rock_Store, South, X_High, Y_High);
+         Tilt (Rock_Store, East, X_High, Y_High);
+         Repeated (Rock_Store, Cycle, Cycle_Map, Repeat, First_Instance);
+         exit when Repeat;
+         Cycle := @ + 1;
+      end loop; -- One Spin
+      Required_Cycle := (Cycles'Last - First_Instance) mod
+        (Cycle - First_Instance) + First_Instance;
+      Put_Line (First_Instance'Img & Cycle'Img & Required_Cycle'Img);
+      return Load (Cycle_Map (Required_Cycle), Y_High);
    end Spin_Cycle; -- One Spin
 
    Rock_Store : Rock_Stores.Map;
@@ -227,9 +239,9 @@ procedure December_14 is
 begin -- December_14
    Read_input (Rock_Store, X_High, Y_High);
    Tilt (Rock_Store, North, X_High, Y_High);
-   Put_Line ("Part one:" & Load (Rock_Store, Y_High)'Img);
+   Put_Line ("Part one:" & Load (Build_Round_Set (Rock_Store), Y_High)'Img);
    DJH.Execution_Time.Put_CPU_Time;
    Read_input (Rock_Store, X_High, Y_High);
-   Put_Line ("Part two:");
+   Put_Line ("Part two:" & Spin_Cycle (Rock_Store, X_High, Y_High)'Img);
    DJH.Execution_Time.Put_CPU_Time;
 end December_14;
