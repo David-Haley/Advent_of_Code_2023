@@ -79,6 +79,7 @@ procedure December_14 is
                    X_High, Y_High : in Ordinates) is
 
       First_Free : Ordinates;
+
    begin -- Tilt
       case Direction is
          when North =>
@@ -110,16 +111,39 @@ procedure December_14 is
                            insert (Rock_Store, (X, First_Free), Round);
                            First_Free := @ - 1;
                            Delete (Rock_Store, (X, Y));
-                        else
+                        elsif Y > Ordinates'First then
                            First_Free := Y - 1;
+                        else
+                           First_Free := Y;
                         end if; -- Y < First_Free
-                     else
+                     elsif Y > Ordinates'First then
                         First_Free := Y - 1; -- Presumed cube
                      end if; -- Rock_Store ((X, Y)) = Round
                   end if; -- Contains (Rock_Store, (X, Y))
                end loop; -- Y in reverse Ordinates range Ordinates'First ...
             end loop; -- X in Ordinates range Ordinates'First .. X_High
          when East =>
+            for Y in Ordinates range Ordinates'First .. Y_High loop
+               First_Free := X_High;
+               for X in reverse Ordinates range Ordinates'First .. X_High loop
+                  if Contains (Rock_Store, (X, Y)) then
+                     if Rock_Store ((X, Y)) = Round then
+                        if X < First_Free then
+                           insert (Rock_Store, (First_Free,Y), Round);
+                           First_Free := @ - 1;
+                           Delete (Rock_Store, (X, Y));
+                        elsif X > Ordinates'First then
+                           First_Free := X - 1;
+                        else
+                           First_Free := X;
+                        end if; -- X > First_Free
+                     elsif X > Ordinates'First then
+                        First_Free := X - 1; -- Presumed cube
+                     end if; -- Rock_Store ((X, Y)) = Round
+                  end if; -- Contains (Rock_Store, (X, Y))
+               end loop; -- X in reverse Ordinates range Ordinates'First ...
+            end loop; -- Y in Ordinates range Ordinates'First .. Y_High
+         when West =>
             for Y in Ordinates range Ordinates'First .. Y_High loop
                First_Free := Ordinates'First;
                for X in Ordinates range Ordinates'First .. X_High loop
@@ -138,25 +162,6 @@ procedure December_14 is
                   end if; -- Contains (Rock_Store, (X, Y))
                end loop; -- X in Ordinates range Ordinates'First .. X_High
             end loop; -- Y in Ordinates range Ordinates'First .. Y_High
-         when West =>
-            for Y in Ordinates range Ordinates'First .. Y_High loop
-               First_Free := X_High;
-               for X in reverse Ordinates range Ordinates'First .. X_High loop
-                  if Contains (Rock_Store, (X, Y)) then
-                     if Rock_Store ((X, Y)) = Round then
-                        if X > First_Free then
-                           insert (Rock_Store, (First_Free,Y), Round);
-                           First_Free := @ - 1;
-                           Delete (Rock_Store, (X, Y));
-                        else
-                           First_Free := X - 1;
-                        end if; -- X > First_Free
-                     else
-                        First_Free := X - 1; -- Presumed cube
-                     end if; -- Rock_Store ((X, Y)) = Round
-                  end if; -- Contains (Rock_Store, (X, Y))
-               end loop; -- X in reverse Ordinates range Ordinates'First ...
-            end loop; -- Y in Ordinates range Ordinates'First .. Y_High
       end case; -- Direction
    end Tilt;
 
@@ -173,7 +178,7 @@ procedure December_14 is
    end Load;
 
    function Build_Round_Set (Rock_Store : in Rock_Stores.Map)
-                                   return Round_Sets.Set is
+                             return Round_Sets.Set is
 
       Result : Round_Sets.Set := Round_Sets.Empty_Set;
 
@@ -204,7 +209,7 @@ procedure December_14 is
 
       begin -- Repeated
          Repeat := False;
-         while Cc /= Cycle_Maps.No_Element loop
+         while not Repeat and  Cc /= Cycle_Maps.No_Element loop
             Repeat := Element (Cc) = Current_Set;
             First_Instance := Key (Cc);
             Next (Cc);
@@ -229,7 +234,6 @@ procedure December_14 is
       end loop; -- One Spin
       Required_Cycle := (Cycles'Last - First_Instance) mod
         (Cycle - First_Instance) + First_Instance;
-      Put_Line (First_Instance'Img & Cycle'Img & Required_Cycle'Img);
       return Load (Cycle_Map (Required_Cycle), Y_High);
    end Spin_Cycle; -- One Spin
 
