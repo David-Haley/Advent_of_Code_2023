@@ -70,15 +70,21 @@ procedure December_17 is
    function Least_Heat (Heat_Loss_Store : in Heat_Loss_Stores.Map;
                         X_High, Y_High : in Ordinates) return Total_Losses is
 
-      package Visited_Lists is new
-        Ada.Containers.Doubly_Linked_Lists (Coordinates);
-      use Visited_Lists;
-
       type Search_Elements is record
          Coordinate : Coordinates;
          Heat_Loss : Total_Losses;
-         Visited_List : Visited_Lists.List := Visited_Lists.Empty_List;
+         Direction_List : Unbounded_String := Null_Unbounded_String;
       end record; --Search_Elements
+
+      subtype Three_Steps is Unbounded_String;
+
+      package History_Maps is new
+        Ada.Containers.Ordered_Maps (Three_Steps, Total_Losses);
+      use History_Maps;
+
+      package Visited_Maps is new
+        Ada.Containers.Ordered_Maps (Coordinates, History_Maps.Map);
+      use Visited_Maps;
 
       function Get_Priority (Search_Element : Search_Elements)
                              return Total_Losses is
@@ -102,108 +108,115 @@ procedure December_17 is
       Queue : Search_Queue.Queue;
 
       procedure Conditional_Enqueue (Current_SE : in Search_Elements;
-                                     Direction : in Directions) is
+                                     Direction : in Directions;
+                                     Visited_Map : in out Visited_Maps.Map) is
 
-         function Valid (Search_Element : in Search_Elements)
+         function Encode (Direction : in Directions) return Character is
+
+         begin -- Encode
+            case Direction is
+               when North => return 'N';
+               when South => return 'S';
+               when East => return 'E';
+               when West => return 'W';
+            end case; -- Direction
+         end Encode;
+
+         function Valid (Search_Element : in Search_Elements;
+                         Visited_Map : in Visited_Maps.Map)
                          return Boolean is
             -- Checks that the path has not returned to any location previously
             -- traversed and that a forth step with the same X or Y coordinate
             -- is not about to be taken
 
             Fail : Boolean := False;
-            Vc : Visited_Lists.Cursor :=
-              Previous (Last (Search_Element.Visited_List));
-            X_Count, Y_Count : Natural := 0;
+            Count : Natural := 0;
+            L : Positive;
+            History_Key : Three_Steps;
 
          begin -- Valid
-            -- Been here before
-            while Vc /= Visited_Lists.No_Element and not Fail loop
-               Fail := Last_Element (Search_Element.Visited_List) =
-                 Element (Vc);
-               Previous (Vc);
-            end loop; -- Vc /= Visited_Lists.No_Element and not Fail
-            Vc := Previous (Last (Search_Element.Visited_List));
+            L := Length (Search_Element.Direction_List);
+            if L >= Max_Steps then
+               History_Key := Unbounded_Slice (Search_Element.Direction_List,
+                                               L - Max_Steps + 1, L);
+            else
+               History_Key := Search_Element.Direction_List;
+            end if; -- L >= Max_Steps
+            if Contains (Visited_Map, Search_Element.Coordinate) and then
+              Contains (Visited_Map (Search_Element.Coordinate),
+                        History_Key) then
+               Fail := Visited_Map (Search_Element.Coordinate) (History_Key)
+                 <= Search_Element.Heat_Loss;
+            end if; -- Contains (Visited_Map, Search_Element.Coordinate) and ...
+            -- Fails if this has been visited, from the same approach and
+            -- less heat loss.
             for I in Positive range 1 .. Max_Steps loop
-               if Vc /= Visited_Lists.No_Element then
-                  if Last_Element (Search_Element.Visited_List).X =
-                    Element (Vc).X then
-                     X_Count := @ + 1;
-                  end if; -- Last_Element (Search_Element.Visited_List).X = ...
-                  if Last_Element (Search_Element.Visited_List).Y =
-                    Element (Vc).Y then
-                     Y_Count := @ + 1;
-                  end if; -- Last_Element (Search_Element.Visited_List).X = ...
-                  Previous (Vc);
-               end if; -- Vc /= Visited_Lists.No_Element
+               if L - I > 0 then
+                  if Element (Search_Element.Direction_List, L) =
+                      Element (Search_Element.Direction_List, L - I) then
+                     Count := @ + 1;
+                  end if; --  Element (Search_Element.Direction_List, L)
+               end if; --  L - I > 0
             end loop; -- I in Positive range 1 .. Max_Steps
-            if Fail or X_Count = Max_Steps or Y_Count = Max_Steps then
+            if Fail or Count = Max_Steps then
                Put_Line (Search_Element'Img);
             end if;
-            return not Fail and X_Count < Max_Steps and Y_Count < Max_Steps;
+            return not Fail and Count < Max_Steps;
          end Valid;
 
          Next_SE : Search_Elements := Current_SE;
+         Enqueue_Next : Boolean := False;
 
       begin -- Conditional_Enqueue
+         Next_SE.Direction_List := @ & Encode (Direction);
          case Direction is
             when North =>
                if Current_SE.Coordinate.Y > Ordinates'First then
                   Next_SE.Coordinate.Y := @ - 1;
                   Next_SE.Heat_Loss := @ + Heat_Loss_Store (Next_SE.Coordinate);
-                  Next_SE.Visited_List := Copy (Current_SE.Visited_List);
-                  Append (Next_SE.Visited_List, Next_SE.Coordinate);
-                  if valid (Next_SE) then
-                     Queue.Enqueue (Next_SE);
-                  end if; -- valid (Next_SE)
+                  Enqueue_Next := valid (Next_SE, Visited_Map);
                end if; -- Current_SE.Coordinate.Y > Ordinates'First
             when East =>
                if Current_SE.Coordinate.X < X_High then
                   Next_SE.Coordinate.X := @ + 1;
                   Next_SE.Heat_Loss := @ + Heat_Loss_Store (Next_SE.Coordinate);
-                  Next_SE.Visited_List := Copy (Current_SE.Visited_List);
-                  Append (Next_SE.Visited_List, Next_SE.Coordinate);
-                  if valid (Next_SE) then
-                     Queue.Enqueue (Next_SE);
-                  end if; -- valid (Next_SE)
+                  Enqueue_Next := valid (Next_SE, Visited_Map);
                end if; -- Current_SE.Coordinate.X < X_High
             when South =>
                if Current_SE.Coordinate.Y < Y_High then
                   Next_SE.Coordinate.Y := @ + 1;
                   Next_SE.Heat_Loss := @ + Heat_Loss_Store (Next_SE.Coordinate);
-                  Next_SE.Visited_List := Copy (Current_SE.Visited_List);
-                  Append (Next_SE.Visited_List, Next_SE.Coordinate);
-                  if valid (Next_SE) then
-                     Queue.Enqueue (Next_SE);
-                  end if; -- valid (Next_SE)
+                  Enqueue_Next := valid (Next_SE, Visited_Map);
                end if; -- Current_SE.Coordinate.Y > Ordinates'First
             when West =>
                if Current_SE.Coordinate.X > Ordinates'First then
                   Next_SE.Coordinate.X := @ - 1;
                   Next_SE.Heat_Loss := @ + Heat_Loss_Store (Next_SE.Coordinate);
-                  Next_SE.Visited_List := Copy (Current_SE.Visited_List);
-                  Append (Next_SE.Visited_List, Next_SE.Coordinate);
-                  if valid (Next_SE) then
-                     Queue.Enqueue (Next_SE);
-                  end if; -- valid (Next_SE)
+                  Enqueue_Next := valid (Next_SE, Visited_Map);
                end if; -- Current_SE.Coordinate.X < X_High
          end case;
+         if Enqueue_Next then
+            -- Add code for updating Visited_Map here.
+            Queue.Enqueue (Next_SE);
+         end if; -- Enqueue_Next
       end  Conditional_Enqueue;
 
-      Current_SE : Search_Elements := ((1, 1), 0, Visited_Lists.Empty_List);
+      Current_SE : Search_Elements := ((1, 1), 0, Null_Unbounded_String);
+      Visited_Map : Visited_Maps.Map;
       Found : Boolean := False;
 
    begin -- Least_Heat
-      Append (Current_SE.Visited_List, Current_SE.Coordinate);
+      Clear (Visited_Map);
       Queue.Enqueue (Current_SE);
       While Queue.Current_Use > 0 and not Found loop
          Queue.Dequeue (Current_SE);
          --  Put_Line (Current_SE.Visited_List'Img);
          Found := Current_SE.Coordinate = (X_High, Y_High);
          if not Found then
-            Conditional_Enqueue (Current_SE, North);
-            Conditional_Enqueue (Current_SE, East);
-            Conditional_Enqueue (Current_SE, South);
-            Conditional_Enqueue (Current_SE, West);
+            Conditional_Enqueue (Current_SE, North, Visited_Map);
+            Conditional_Enqueue (Current_SE, East, Visited_Map);
+            Conditional_Enqueue (Current_SE, South, Visited_Map);
+            Conditional_Enqueue (Current_SE, West, Visited_Map);
          end if; -- not Found
       end loop; -- Queue.Current_Use > 0
       Put_Line (Current_SE'Img);
