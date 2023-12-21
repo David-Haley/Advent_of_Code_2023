@@ -2,10 +2,8 @@ with Ada.Text_IO; use Ada.Text_IO;
 with Ada.Command_Line; use Ada.Command_Line;
 with Ada.Text_IO.Unbounded_IO; use Ada.Text_IO.Unbounded_IO;
 with Ada.Strings; use Ada.Strings;
-with Ada.Strings.Maps; use Ada.Strings.Maps;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Ada.Containers; use Ada.Containers;
-with Ada.Containers.Doubly_Linked_Lists;
 with Ada.Containers.Ordered_Maps;
 with Ada.Containers.Synchronized_Queue_Interfaces;
 with Ada.Containers.Unbounded_Priority_Queues;
@@ -95,6 +93,8 @@ procedure December_17 is
       function Before (Left, Right : Total_Losses) return Boolean is
         (Left < Right);
 
+      pragma Inline_Always (Get_Priority, Before);
+
       package Queue_Interface is new
         Ada.Containers.Synchronized_Queue_Interfaces (Search_Elements);
       use Queue_Interface;
@@ -122,34 +122,67 @@ procedure December_17 is
             end case; -- Direction
          end Encode;
 
+         function History_Key (Search_Element : in Search_Elements)
+                               return Three_Steps is
+
+            L : Positive := Length (Search_Element.Direction_List);
+            Three_Step : Three_Steps;
+
+         begin -- History_Key
+            if L >= Max_Steps then
+               Three_Step := Unbounded_Slice (Search_Element.Direction_List,
+                                          L - Max_Steps + 1, L);
+            else
+               Three_Step := Search_Element.Direction_List;
+            end if; -- L >= Max_Steps
+            return Three_Step;
+         end History_Key;
+
+         function Backtrack (Search_Element : in Search_Elements)
+                             return Boolean is
+
+            L : Positive := Length (Search_Element.Direction_List);
+
+         begin -- Backtrack
+            if L < 2 then
+               return False;
+            else
+               return (Element (Search_Element.Direction_List, L) = 'N' and
+                         Element (Search_Element.Direction_List, L - 1) = 'S')
+                 or (Element (Search_Element.Direction_List, L) = 'S' and
+                         Element (Search_Element.Direction_List, L - 1) = 'N')
+                 or (Element (Search_Element.Direction_List, L) = 'E' and
+                         Element (Search_Element.Direction_List, L - 1) = 'W')
+                 or (Element (Search_Element.Direction_List, L) = 'W' and
+                         Element (Search_Element.Direction_List, L - 1) = 'E');
+            end if; -- L < 2
+         end Backtrack;
+
+         pragma Inline_Always (History_Key, Backtrack);
+
          function Valid (Search_Element : in Search_Elements;
                          Visited_Map : in Visited_Maps.Map)
                          return Boolean is
+
             -- Checks that the path has not returned to any location previously
             -- traversed and that a forth step with the same X or Y coordinate
-            -- is not about to be taken
+            -- is not about to be taken.
 
             Fail : Boolean := False;
             Count : Natural := 0;
-            L : Positive;
-            History_Key : Three_Steps;
+            L : Positive := Length (Search_Element.Direction_List);
 
          begin -- Valid
-            L := Length (Search_Element.Direction_List);
-            if L >= Max_Steps then
-               History_Key := Unbounded_Slice (Search_Element.Direction_List,
-                                               L - Max_Steps + 1, L);
-            else
-               History_Key := Search_Element.Direction_List;
-            end if; -- L >= Max_Steps
             if Contains (Visited_Map, Search_Element.Coordinate) and then
               Contains (Visited_Map (Search_Element.Coordinate),
-                        History_Key) then
-               Fail := Visited_Map (Search_Element.Coordinate) (History_Key)
-                 <= Search_Element.Heat_Loss;
+                        History_Key (Search_Element)) then
+               Fail := Visited_Map (Search_Element.Coordinate)
+                 (History_Key (Search_Element)) <= Search_Element.Heat_Loss;
             end if; -- Contains (Visited_Map, Search_Element.Coordinate) and ...
             -- Fails if this has been visited, from the same approach and
             -- less heat loss.
+            Fail := Fail or Backtrack (Search_Element);
+            -- Also fails if there is a direct backtrack.
             for I in Positive range 1 .. Max_Steps loop
                if L - I > 0 then
                   if Element (Search_Element.Direction_List, L) =
@@ -158,11 +191,10 @@ procedure December_17 is
                   end if; --  Element (Search_Element.Direction_List, L)
                end if; --  L - I > 0
             end loop; -- I in Positive range 1 .. Max_Steps
-            if Fail or Count = Max_Steps then
-               Put_Line (Search_Element'Img);
-            end if;
             return not Fail and Count < Max_Steps;
          end Valid;
+
+         pragma Inline_Always (Valid);
 
          Next_SE : Search_Elements := Current_SE;
          Enqueue_Next : Boolean := False;
@@ -196,7 +228,17 @@ procedure December_17 is
                end if; -- Current_SE.Coordinate.X < X_High
          end case;
          if Enqueue_Next then
-            -- Add code for updating Visited_Map here.
+            if not Contains (Visited_Map, Next_SE.Coordinate) then
+               insert (Visited_Map, Next_SE.Coordinate, History_Maps.Empty_Map);
+            end if; -- not Contains (Visited_Map, Next_SE.Coordinate)
+            if not Contains (Visited_Map (Next_SE.Coordinate),
+                             History_Key (Next_SE)) then
+               insert (Visited_Map (Next_SE.Coordinate), History_Key (Next_SE),
+                       Next_SE.Heat_Loss);
+            else
+               Visited_Map (Next_SE.Coordinate) (History_Key (Next_SE)) :=
+                 Next_SE.Heat_Loss;
+            end if; -- not Contains (Visited_Map (Next_SE.Coordinate), ...
             Queue.Enqueue (Next_SE);
          end if; -- Enqueue_Next
       end  Conditional_Enqueue;
@@ -210,7 +252,6 @@ procedure December_17 is
       Queue.Enqueue (Current_SE);
       While Queue.Current_Use > 0 and not Found loop
          Queue.Dequeue (Current_SE);
-         --  Put_Line (Current_SE.Visited_List'Img);
          Found := Current_SE.Coordinate = (X_High, Y_High);
          if not Found then
             Conditional_Enqueue (Current_SE, North, Visited_Map);
@@ -219,8 +260,11 @@ procedure December_17 is
             Conditional_Enqueue (Current_SE, West, Visited_Map);
          end if; -- not Found
       end loop; -- Queue.Current_Use > 0
-      Put_Line (Current_SE'Img);
-      return Current_SE.Heat_Loss;
+      if Found then
+         return Current_SE.Heat_Loss;
+      else
+         return Total_Losses'Last;
+      end if; -- Found
    end Least_Heat;
 
    Heat_Loss_Store : Heat_Loss_Stores.Map;
