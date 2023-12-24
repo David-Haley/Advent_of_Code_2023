@@ -17,7 +17,9 @@ procedure December_17 is
 
    subtype Heat_Losses is Positive range 1 .. 9;
 
-   Max_Steps : constant Positive := 3;
+   subtype Steps is Natural range 0 .. 10;
+
+   --  Max_Steps : constant Positive := 3;
 
    type Coordinates is record
       X, Y : Ordinates;
@@ -30,10 +32,10 @@ procedure December_17 is
      Ada.Containers.Ordered_Maps (Coordinates, Heat_Losses);
    use Heat_Loss_Stores;
 
-   type Directions is (North, East, South, West);
+   type Directions is (North, East, South, West, None);
 
    procedure Read_Input (Heat_Loss_Store : out Heat_Loss_Stores.Map;
-                        X_High, Y_High : out Ordinates) is
+                         X_High, Y_High : out Ordinates) is
 
       Input_File : File_Type;
       Text : Unbounded_String;
@@ -66,18 +68,18 @@ procedure December_17 is
    end Read_input;
 
    function Least_Heat (Heat_Loss_Store : in Heat_Loss_Stores.Map;
-                        X_High, Y_High : in Ordinates) return Total_Losses is
+                        X_High, Y_High : in Ordinates;
+                        Min_Steps : Steps := 1;
+                        Max_Steps : Steps := 3) return Total_Losses is
 
       type Search_Elements is record
-         Coordinate : Coordinates;
+         Coordinate, Previous : Coordinates;
          Heat_Loss : Total_Losses;
-         Direction_List : Unbounded_String := Null_Unbounded_String;
+         Direction : Directions;
       end record; --Search_Elements
 
-      subtype Three_Steps is Unbounded_String;
-
       package History_Maps is new
-        Ada.Containers.Ordered_Maps (Three_Steps, Total_Losses);
+        Ada.Containers.Ordered_Maps (Coordinates, Total_Losses);
       use History_Maps;
 
       package Visited_Maps is new
@@ -111,139 +113,96 @@ procedure December_17 is
                                      Direction : in Directions;
                                      Visited_Map : in out Visited_Maps.Map) is
 
-         function Encode (Direction : in Directions) return Character is
-
-         begin -- Encode
-            case Direction is
-               when North => return 'N';
-               when South => return 'S';
-               when East => return 'E';
-               when West => return 'W';
-            end case; -- Direction
-         end Encode;
-
-         function History_Key (Search_Element : in Search_Elements)
-                               return Three_Steps is
-
-            L : Positive := Length (Search_Element.Direction_List);
-            Three_Step : Three_Steps;
-
-         begin -- History_Key
-            if L >= Max_Steps then
-               Three_Step := Unbounded_Slice (Search_Element.Direction_List,
-                                          L - Max_Steps + 1, L);
-            else
-               Three_Step := Search_Element.Direction_List;
-            end if; -- L >= Max_Steps
-            return Three_Step;
-         end History_Key;
-
-         function Backtrack (Search_Element : in Search_Elements)
-                             return Boolean is
-
-            L : Positive := Length (Search_Element.Direction_List);
-
-         begin -- Backtrack
-            if L < 2 then
-               return False;
-            else
-               return (Element (Search_Element.Direction_List, L) = 'N' and
-                         Element (Search_Element.Direction_List, L - 1) = 'S')
-                 or (Element (Search_Element.Direction_List, L) = 'S' and
-                         Element (Search_Element.Direction_List, L - 1) = 'N')
-                 or (Element (Search_Element.Direction_List, L) = 'E' and
-                         Element (Search_Element.Direction_List, L - 1) = 'W')
-                 or (Element (Search_Element.Direction_List, L) = 'W' and
-                         Element (Search_Element.Direction_List, L - 1) = 'E');
-            end if; -- L < 2
-         end Backtrack;
-
-         pragma Inline_Always (History_Key, Backtrack);
-
          function Valid (Search_Element : in Search_Elements;
                          Visited_Map : in Visited_Maps.Map)
                          return Boolean is
 
-            -- Checks that the path has not returned to any location previously
-            -- traversed and that a forth step with the same X or Y coordinate
-            -- is not about to be taken.
+            -- Checks that this position has either not been arrived at from
+            -- the previous coordinates or if it has that the heat loss is
+            -- lesss.
 
-            Fail : Boolean := False;
-            Count : Natural := 0;
-            L : Positive := Length (Search_Element.Direction_List);
+            Result : Boolean := True;
 
          begin -- Valid
             if Contains (Visited_Map, Search_Element.Coordinate) and then
               Contains (Visited_Map (Search_Element.Coordinate),
-                        History_Key (Search_Element)) then
-               Fail := Visited_Map (Search_Element.Coordinate)
-                 (History_Key (Search_Element)) <= Search_Element.Heat_Loss;
+                        Search_Element.Previous) then
+               Result := Visited_Map (Search_Element.Coordinate)
+                 (Search_Element.Previous) > Search_Element.Heat_Loss;
             end if; -- Contains (Visited_Map, Search_Element.Coordinate) and ...
             -- Fails if this has been visited, from the same approach and
             -- less heat loss.
-            Fail := Fail or Backtrack (Search_Element);
-            -- Also fails if there is a direct backtrack.
-            for I in Positive range 1 .. Max_Steps loop
-               if L - I > 0 then
-                  if Element (Search_Element.Direction_List, L) =
-                      Element (Search_Element.Direction_List, L - I) then
-                     Count := @ + 1;
-                  end if; --  Element (Search_Element.Direction_List, L)
-               end if; --  L - I > 0
-            end loop; -- I in Positive range 1 .. Max_Steps
-            return not Fail and Count < Max_Steps;
+            return Result;
          end Valid;
 
          pragma Inline_Always (Valid);
 
          Next_SE : Search_Elements := Current_SE;
-         Enqueue_Next : Boolean := False;
+         Enqueue_Next : Boolean;
 
       begin -- Conditional_Enqueue
-         Next_SE.Direction_List := @ & Encode (Direction);
-         case Direction is
+         Next_SE.Previous := Current_SE.Coordinate;
+         Next_SE.Direction := Direction;
+         for Step in Steps range Min_Steps .. Max_Steps loop
+            Next_SE.Heat_Loss := Current_SE.Heat_Loss;
+            Enqueue_Next := False;
+            case Direction is
             when North =>
-               if Current_SE.Coordinate.Y > Ordinates'First then
-                  Next_SE.Coordinate.Y := @ - 1;
-                  Next_SE.Heat_Loss := @ + Heat_Loss_Store (Next_SE.Coordinate);
+               if Current_SE.Coordinate.Y - Step >= Ordinates'First then
+                  Next_SE.Coordinate.Y := Current_SE.Coordinate.Y - Step;
+                  for Y in Ordinates range Next_SE.Coordinate.Y ..
+                    Current_SE.Coordinate.Y - 1 loop
+                     Next_SE.Heat_Loss := @ +
+                       Heat_Loss_Store ((Next_SE.Coordinate.X, Y));
+                  end loop; -- Y in Ordinates range Next_SE.Coordinate.Y ...
                   Enqueue_Next := valid (Next_SE, Visited_Map);
-               end if; -- Current_SE.Coordinate.Y > Ordinates'First
+               end if; -- Current_SE.Coordinate.Y - Step >= Ordinates'First
             when East =>
-               if Current_SE.Coordinate.X < X_High then
-                  Next_SE.Coordinate.X := @ + 1;
-                  Next_SE.Heat_Loss := @ + Heat_Loss_Store (Next_SE.Coordinate);
+               if Current_SE.Coordinate.X + Step <= X_High then
+                  Next_SE.Coordinate.X := Current_SE.Coordinate.X + Step;
+                  for X in Ordinates range Current_SE.Coordinate.X + 1 ..
+                    Next_SE.Coordinate.X loop
+                     Next_SE.Heat_Loss := @ +
+                       Heat_Loss_Store ((X, Next_SE.Coordinate.Y));
+                  end loop; -- X in Ordinates range Current_SE.Coordinate.X + 1
                   Enqueue_Next := valid (Next_SE, Visited_Map);
-               end if; -- Current_SE.Coordinate.X < X_High
+               end if; -- Current_SE.Coordinate.X + Step <= X_High
             when South =>
-               if Current_SE.Coordinate.Y < Y_High then
-                  Next_SE.Coordinate.Y := @ + 1;
-                  Next_SE.Heat_Loss := @ + Heat_Loss_Store (Next_SE.Coordinate);
+               if Current_SE.Coordinate.Y + Step <= Y_High then
+                  Next_SE.Coordinate.Y := Current_SE.Coordinate.Y + Step;
+                  for Y in Ordinates range Current_SE.Coordinate.Y + 1 ..
+                    Next_SE.Coordinate.Y loop
+                     Next_SE.Heat_Loss := @ +
+                       Heat_Loss_Store ((Next_SE.Coordinate.X, Y));
+                  end loop; -- Y in Ordinates range Current_SE.Coordinate.Y + 1
                   Enqueue_Next := valid (Next_SE, Visited_Map);
-               end if; -- Current_SE.Coordinate.Y > Ordinates'First
+               end if; -- Current_SE.Coordinate.Y + Step <= Y_High
             when West =>
-               if Current_SE.Coordinate.X > Ordinates'First then
-                  Next_SE.Coordinate.X := @ - 1;
-                  Next_SE.Heat_Loss := @ + Heat_Loss_Store (Next_SE.Coordinate);
+               if Current_SE.Coordinate.X - Step >= Ordinates'First then
+                  Next_SE.Coordinate.X := Current_SE.Coordinate.X - Step;
+                  for X in Ordinates range Next_SE.Coordinate.X ..
+                    Current_SE.Coordinate.X - 1 loop
+                     Next_SE.Heat_Loss := @ +
+                       Heat_Loss_Store ((X, Next_SE.Coordinate.Y));
+                  end loop; -- X in Ordinates range Next_SE.Coordinate.X ...
                   Enqueue_Next := valid (Next_SE, Visited_Map);
-               end if; -- Current_SE.Coordinate.X < X_High
-         end case;
-         if Enqueue_Next then
-            if not Contains (Visited_Map, Next_SE.Coordinate) then
-               insert (Visited_Map, Next_SE.Coordinate, History_Maps.Empty_Map);
-            end if; -- not Contains (Visited_Map, Next_SE.Coordinate)
-            if not Contains (Visited_Map (Next_SE.Coordinate),
-                             History_Key (Next_SE)) then
-               insert (Visited_Map (Next_SE.Coordinate), History_Key (Next_SE),
-                       Next_SE.Heat_Loss);
-            else
-               Visited_Map (Next_SE.Coordinate) (History_Key (Next_SE)) :=
-                 Next_SE.Heat_Loss;
-            end if; -- not Contains (Visited_Map (Next_SE.Coordinate), ...
-            Queue.Enqueue (Next_SE);
-         end if; -- Enqueue_Next
+               end if; -- Current_SE.Coordinate.X - Step >= Ordinates'First
+            when None =>
+               raise Program_Error with "Not a travel direction";
+            end case; -- Direction
+            if Enqueue_Next then
+               if not Contains (Visited_Map, Next_SE.Coordinate) then
+                  insert (Visited_Map, Next_SE.Coordinate,
+                          History_Maps.Empty_Map);
+               end if; -- not Contains (Visited_Map, Next_SE.Coordinate)
+               include (Visited_Map (Next_SE.Coordinate), Next_SE.Previous,
+                        Next_SE.Heat_Loss);
+               Queue.Enqueue (Next_SE);
+            end if; -- Enqueue_Next
+         end loop; -- Step in Steps range Min_Steps .. Max_Steps
       end  Conditional_Enqueue;
 
-      Current_SE : Search_Elements := ((1, 1), 0, Null_Unbounded_String);
+      Current_SE : Search_Elements := ((1, 1), (1, 1), 0, None);
       Visited_Map : Visited_Maps.Map;
       Found : Boolean := False;
 
@@ -254,10 +213,20 @@ procedure December_17 is
          Queue.Dequeue (Current_SE);
          Found := Current_SE.Coordinate = (X_High, Y_High);
          if not Found then
-            Conditional_Enqueue (Current_SE, North, Visited_Map);
-            Conditional_Enqueue (Current_SE, East, Visited_Map);
-            Conditional_Enqueue (Current_SE, South, Visited_Map);
-            Conditional_Enqueue (Current_SE, West, Visited_Map);
+            -- Must turn no backtracking
+            case Current_SE.Direction is
+               when North | South =>
+                  Conditional_Enqueue (Current_SE, East, Visited_Map);
+                  Conditional_Enqueue (Current_SE, West, Visited_Map);
+               when East | West =>
+                  Conditional_Enqueue (Current_SE, North, Visited_Map);
+                  Conditional_Enqueue (Current_SE, South, Visited_Map);
+               when None =>
+                  Conditional_Enqueue (Current_SE, North, Visited_Map);
+                  Conditional_Enqueue (Current_SE, East, Visited_Map);
+                  Conditional_Enqueue (Current_SE, South, Visited_Map);
+                  Conditional_Enqueue (Current_SE, West, Visited_Map);
+            end case; -- Current_SE.Direction
          end if; -- not Found
       end loop; -- Queue.Current_Use > 0
       if Found then
@@ -274,6 +243,7 @@ begin -- December_17
    Read_input (Heat_Loss_Store, X_High, Y_High);
    Put_Line ("Part one:" & Least_Heat (Heat_Loss_Store, X_High, Y_High)'Img);
    DJH.Execution_Time.Put_CPU_Time;
-   Put_Line ("Part two:");
+   Put_Line ("Part two:" &
+               Least_Heat (Heat_Loss_Store, X_High, Y_High, 4, 10)'Img);
    DJH.Execution_Time.Put_CPU_Time;
 end December_17;
