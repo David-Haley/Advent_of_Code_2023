@@ -14,6 +14,8 @@ with DJH.Execution_Time; use DJH.Execution_Time;
 
 procedure December_25 is
 
+   -- Solution based on 4Hbq posting on Reddit
+
    subtype Component_Names is String (1 .. 3);
 
    package Neighbours is new Ada.Containers.Ordered_Sets (Component_Names);
@@ -23,29 +25,7 @@ procedure December_25 is
      Ada.Containers.Ordered_Maps (Component_Names, Neighbours.Set);
    use Connection_Maps;
 
-   type Connections is record
-      Node_1, Node_2 : Component_Names;
-   end record; -- Connections
-
-   function "<" (Left, Right : Connections) return Boolean is
-      ((Left.Node_1 & Left.Node_2) < (Right.Node_1 & Right.Node_2));
-
-   package Connection_Sets is new Ada.Containers.Ordered_Sets (Connections);
-   use Connection_Sets;
-
-   package Link_Lists is new
-     Ada.Containers.Ordered_Maps (Connections, Connection_Sets.Set);
-   use Link_Lists;
-
-   Function Make_Key (Left, Right : in Component_Names) return Connections is
-
-   begin -- Make_Key
-      if Left < Right then
-         return (Left, Right);
-      else
-         return (Right, Left);
-      end if; -- Left < Right
-   end Make_Key;
+   type Disjoint_Sets is array (Boolean) of Neighbours.Set;
 
    procedure Read_input (Connection_Map : out Connection_Maps.Map) is
 
@@ -65,7 +45,6 @@ procedure December_25 is
       Clear (Connection_Map);
       while not End_Of_File (Input_File) loop
          Get_Line (Input_File, Text);
-         Put_Line (Text);
          Start_At := 1;
          Find_Token (Text, Delimiters, Start_at, Outside, First, Last);
          Key := Slice (Text, First, Last);
@@ -97,73 +76,106 @@ procedure December_25 is
       end loop; -- Cc /= Connection_Maps.No_Element
    end Complete_Map;
 
-   procedure Build (Connection_Map : in Connection_Maps.Map;
-                    Link_List : in out Link_Lists.Map) is
+   procedure Initial_Split (Connection_Map : in Connection_Maps.Map;
+                            Disjoint_Set : out Disjoint_Sets) is
 
-      package Visited_Lists is new
-        Ada.Containers.Doubly_Linked_Lists (Component_Names);
-      use Visited_Lists;
+      S : Boolean := True;
 
-      procedure Find (Source, Destination : Component_Names;
-                      Connection_Map : in Connection_Maps.Map;
-                      Link_List : in out Link_Lists.Map;
-                      Visited_List : in out Visited_Lists.List) is
+   begin -- Initial_Split
+      Disjoint_Set := (others => Neighbours.Empty_Set);
+      for C in Iterate (Connection_Map) loop
+         insert (Disjoint_Set (S), Key (C));
+         S := not S;
+      end loop; -- C in Iterate (Connection_Map)
+   end Initial_Split;
 
-         V2 : Visited_Lists.Cursor;
+   procedure Split (Connection_Map : in Connection_Maps.Map;
+                    Disjoint_Set : in out Disjoint_Sets) is
 
-      begin -- Find
-         if Destination < Source then
-            raise Program_Error with "not correctly ordered: " & Source & ", "
-              & Destination;
-         end if; -- Destination < Source
-         if Destination = Last_Element (Visited_List) then
-            -- destination found store results
-            for V1 in Iterate (Visited_List) loop
-               V2 := Next (V1);
-               if V2 /= Visited_Lists.No_Element then
-                  if not Contains (Link_List,
-                                   Make_Key (Element (V1), Element (V2))) then
-                     Insert (Link_List,
-                             Make_Key (Element (V1), Element (V2)),
-                             Connection_Sets.Empty_Set);
-                  end if; -- not Contains (Link_List,
-                  Include (Link_List (Make_Key (Element (V1), Element (V2))),
-                           (Source, Destination));
-               end if; -- V2 /= Visited_Lists.No_Element
-            end loop; -- V1 in Iterate (Visited_List)
+      function External_Count (Component : in Component_names;
+                               Connection_Map : in Connection_Maps.Map;
+                               Disjoint_Set : in Disjoint_Sets)
+                               return Natural is
+
+         Count : Natural := 0;
+
+      begin -- External_Count
+         if Contains (Disjoint_Set (False), Component) then
+            for N in Iterate (Connection_Map (Component)) loop
+               if Contains (Disjoint_Set (True), Element (N)) then
+                  Count := @ + 1;
+               end if; -- Contains (Disjoint_Set (True), Element (N))
+            end loop; -- N in Iterate (Connection_Map (Component))
          else
-            -- Continue search
-            for N in Iterate (Connection_Map (Last_Element (Visited_List))) loop
-               Append (Visited_List, Element (N));
-               Find (Source, Destination, Connection_Map, Link_Lists,
-                     Visited_List);
-               Delete_Last (Visited_List);
-            end loop; -- N in Iterate (Connection_Map (Last_Element ...
-         end if; -- Destination = Last_Element (Visited_List)
-      end Find;
+            for N in Iterate (Connection_Map (Component)) loop
+               if Contains (Disjoint_Set (False), Element (N)) then
+                  Count := @ + 1;
+               end if; -- Contains (Disjoint_Set (False), Element (N))
+            end loop; -- N in Iterate (Connection_Map (Component))
+         end if; -- Contains (Disjoint_Set (False), Component)
+         return Count;
+      end External_Count;
 
-      C2 : Connection_Maps.Cursor;
-      Visited_List : Visited_Lists;
+      Finished : Boolean := False;
+      Nc, Next_Nc : Neighbours.Cursor;
+      Max_Count : Natural;
 
-   begin -- Build
-      for C1 in Iterate (Connection_Map) loop
-         Clear (Visited_List);
-         C2 := Next (C1);
-         while C2 /= Connection_Maps.No_Element loop
-            Find (Key (C1), Key (C2), Connection_Map, Link_Lists, Visited_List);
-         end loop; -- C2 /= Connection_Maps.No_Element
-      end loop; -- C1 in Iterate (Connection_Map)
-   end Build;
+   begin -- Split
+      while not Finished loop
+         for S in Boolean loop
+            Max_Count := 0;
+            for N in Iterate (Disjoint_Set (S)) loop
+               if Max_Count < External_Count (Element (N), Connection_Map,
+                                              Disjoint_Set) then
+                  Max_Count := External_Count (Element (N), Connection_Map,
+                                               Disjoint_Set);
+               end if; -- Max_Count < External_Count (Element (N) ...
+            end loop; -- N in Iterate (Disjoint_Set (S)) loop
+            Nc := First (Disjoint_Set (S));
+            while Nc /= Neighbours.No_Element loop
+               if External_Count (Element (Nc), Connection_Map, Disjoint_Set) =
+                 Max_Count then
+                  Put (Element (Nc) & " ");
+                  insert (Disjoint_Set (not S), Element (Nc));
+                  Next_Nc := Next (Nc);
+                  Delete (Disjoint_Set (S), Nc);
+                  Nc := Next_Nc;
+               else
+                  Next (Nc);
+               end if; -- External_Count (Element (Nc), Connection_Map ...
+            end loop; -- Nc /= Neighbours.No_Element
+            if S then
+               Put_Line ("<");
+            else
+               Put_Line (">");
+            end if; -- S
+            Put_Line (Length (Disjoint_Set (False))'Img & Length (Disjoint_Set (True))'Img);
+         end loop; -- S in Boolean
+         Finished := True;
+         for F in Iterate (Disjoint_Set (False)) loop
+            Finished := @ and External_Count (Element (F), Connection_Map,
+                                              Disjoint_Set) <= 3;
+         end loop; -- F in Iterate (Disjoint_Set (False))
+         for T in Iterate (Disjoint_Set (True)) loop
+            Finished := @ and External_Count (Element (T), Connection_Map,
+                                              Disjoint_Set) <= 3;
+         end loop; -- T in Iterate (Disjoint_Set (False))
+      end loop; -- not Finished;
+   end Split;
 
    Connection_Map : Connection_Maps.Map;
+   Disjoint_Set : Disjoint_Sets;
 
 begin -- December_25
    Read_input (Connection_Map);
-   Put_Line (Connection_Map'Img);
    Complete_Map (Connection_Map);
-   Put_Line (Connection_Map'Img);
-   Put_Line ("Part one:");
-   DJH.Execution_Time.Put_CPU_Time;
-   Put_Line ("Part two:");
+   for C in Iterate (Connection_Map) loop
+      Put_Line (Key (C) & Length (Element (C))'Img);
+   end loop;
+   Initial_Split (Connection_Map, Disjoint_Set);
+   Split (Connection_Map, Disjoint_Set);
+   Put_Line (Disjoint_Set'Img);
+   Put_Line ("Part one:" & Count_Type'Image (Length (Disjoint_Set (False)) *
+               Length (Disjoint_Set(True))));
    DJH.Execution_Time.Put_CPU_Time;
 end December_25;
