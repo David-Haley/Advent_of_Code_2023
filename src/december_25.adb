@@ -123,25 +123,23 @@ procedure December_25 is
          Result : Neighbours.Set := Neighbours.Empty_Set;
 
       begin -- Connections
-         for S in Boolean loop
-            for M in Iterate (Disjoint_Set (S)) loop
+            for M in Iterate (Disjoint_Set (False)) loop
                for N in Iterate (Connection_Map (Element (M))) loop
-                  If Contains (Disjoint_Set (not S), Element (N)) then
+                  If Contains (Disjoint_Set (True), Element (N)) then
                      Include (Result, Element (N));
                   end if; -- Contains (Disjoint_Set (not S), Element (N))
                end loop; -- N in Iterate (Connection_Map (Element (M)))
-            end loop; -- M in Iterate (Disjoint_Set (S))
-         end loop; -- S in Boolean
+            end loop; -- Iterate (Disjoint_Set (False))
          return Result;
       end Connections;
 
-      Nc, Next_Nc : Neighbours.Cursor;
+      Nc : Neighbours.Cursor;
       Max_Count : Natural;
 
    begin -- Split
       while Length (Connections (Connection_Map, Disjoint_Set)) /= 3 loop
          for S in Boolean loop
-            Max_Count := 2;
+            Max_Count := 3;
             for N in Iterate (Disjoint_Set (S)) loop
                if Max_Count < External_Count (Element (N), Connection_Map,
                                               Disjoint_Set) then
@@ -155,9 +153,8 @@ procedure December_25 is
                  Max_Count then
                   Put (Element (Nc) & " ");
                   insert (Disjoint_Set (not S), Element (Nc));
-                  Next_Nc := Next (Nc);
                   Delete (Disjoint_Set (S), Nc);
-                  Nc := Next_Nc;
+                  Nc := First (Disjoint_Set (S));
                else
                   Next (Nc);
                end if; -- External_Count (Element (Nc), Connection_Map ...
