@@ -116,14 +116,32 @@ procedure December_25 is
          return Count;
       end External_Count;
 
-      Finished : Boolean := False;
+      function Connections (Connection_Map : in Connection_Maps.Map;
+                            Disjoint_Set : in Disjoint_Sets)
+                            return Neighbours.set is
+
+         Result : Neighbours.Set := Neighbours.Empty_Set;
+
+      begin -- Connections
+         for S in Boolean loop
+            for M in Iterate (Disjoint_Set (S)) loop
+               for N in Iterate (Connection_Map (Element (M))) loop
+                  If Contains (Disjoint_Set (not S), Element (N)) then
+                     Include (Result, Element (N));
+                  end if; -- Contains (Disjoint_Set (not S), Element (N))
+               end loop; -- N in Iterate (Connection_Map (Element (M)))
+            end loop; -- M in Iterate (Disjoint_Set (S))
+         end loop; -- S in Boolean
+         return Result;
+      end Connections;
+
       Nc, Next_Nc : Neighbours.Cursor;
       Max_Count : Natural;
 
    begin -- Split
-      while not Finished loop
+      while Length (Connections (Connection_Map, Disjoint_Set)) /= 3 loop
          for S in Boolean loop
-            Max_Count := 0;
+            Max_Count := 2;
             for N in Iterate (Disjoint_Set (S)) loop
                if Max_Count < External_Count (Element (N), Connection_Map,
                                               Disjoint_Set) then
@@ -149,18 +167,10 @@ procedure December_25 is
             else
                Put_Line (">");
             end if; -- S
+            Put_Line ("Connections: " & Connections (Connection_Map, Disjoint_Set)'Img);
             Put_Line (Length (Disjoint_Set (False))'Img & Length (Disjoint_Set (True))'Img);
          end loop; -- S in Boolean
-         Finished := True;
-         for F in Iterate (Disjoint_Set (False)) loop
-            Finished := @ and External_Count (Element (F), Connection_Map,
-                                              Disjoint_Set) <= 3;
-         end loop; -- F in Iterate (Disjoint_Set (False))
-         for T in Iterate (Disjoint_Set (True)) loop
-            Finished := @ and External_Count (Element (T), Connection_Map,
-                                              Disjoint_Set) <= 3;
-         end loop; -- T in Iterate (Disjoint_Set (False))
-      end loop; -- not Finished;
+      end loop; -- Length (Connections (Connection_Map, Disjoint_Set)) /= 3
    end Split;
 
    Connection_Map : Connection_Maps.Map;
