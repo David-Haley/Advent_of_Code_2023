@@ -114,14 +114,8 @@ procedure December_22 is
                -- Brick.P1.Y = Brick.P2.Y => Perpendicular
                Result := (Dropped_Brick.P1.Y <= Brick.P1.Y and
                             Brick.P1.Y <= Dropped_Brick.P2.Y) and then
-                 ((Dropped_Brick.P1.X <= Brick.P1.X and
-                       Brick.P1.X <= Dropped_Brick.P2.X) or
-                    (Dropped_Brick.P1.X <= Brick.P2.X and
-                         Brick.P2.X <= Dropped_Brick.P2.X) or
-                    (Brick.P1.X <= Dropped_Brick.P1.X and
-                         Dropped_Brick.P1.X <= Brick.P2.X) or
-                    (Brick.P1.X <= Dropped_Brick.P2.X and
-                         Dropped_Brick.P2.X <= Brick.P2.X));
+                 (Brick.P1.X <= Dropped_Brick.P1.X and
+                    Dropped_Brick.P1.X <= Brick.P2.X);
             end if; -- Brick.P1.X = Brick.P2.X
          else
             -- Dropped_Brick.P1.Y = Dropped_Brick.P2.Y
@@ -138,16 +132,10 @@ procedure December_22 is
                          Dropped_Brick.P2.X <= Brick.P2.X));
             else
                -- Brick.P1.X = Brick.P2.X => Perpendicular
-               Result := (Dropped_Brick.P1.X <= Brick.P1.X and
-                            Brick.P1.X <= Dropped_Brick.P2.X) and then
-                 ((Dropped_Brick.P1.Y <= Brick.P1.Y and
-                       Brick.P1.Y <= Dropped_Brick.P2.Y) or
-                    (Dropped_Brick.P1.Y <= Brick.P2.Y and
-                         Brick.P2.Y <= Dropped_Brick.P2.Y) or
-                    (Brick.P1.Y <= Dropped_Brick.P1.Y and
-                         Dropped_Brick.P1.Y <= Brick.P2.Y) or
-                    (Brick.P1.Y <= Dropped_Brick.P2.Y and
-                         Dropped_Brick.P2.Y <= Brick.P2.Y));
+               Result := (Brick.P1.Y <= Dropped_Brick.P1.Y and
+                            Dropped_Brick.P1.Y <= Brick.P2.Y) and then
+                 (Dropped_Brick.P1.X <= Brick.P1.X and
+                    Brick.P1.X <= Dropped_Brick.P2.X);
             end if; -- Brick.P1.Y = Brick.P2.Y
          end if; -- Dropped_Brick.P1.X = Dropped_Brick.P2.X
          return Result;
