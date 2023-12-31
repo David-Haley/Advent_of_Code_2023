@@ -28,6 +28,11 @@ procedure December_22 is
    package Brick_Stores is new Ada.Containers.Vectors (Brick_IDs, Bricks);
    use Brick_Stores;
 
+   function "<" (Left, Right : Bricks) return Boolean is
+     (Left.P1.Z < Right.P1.Z);
+
+   package Brick_Sort is new Brick_Stores.Generic_Sorting;
+
    package Support_Sets is new Ada.Containers.Ordered_Sets (Brick_IDs);
    use Support_Sets;
 
@@ -193,7 +198,6 @@ procedure December_22 is
          for B in Iterate (Brick_Stack (Z)) loop
             if Element (B).Is_Top then
                Count := @ + 1;
-               Put_Line ("On Top" & Element (B).Brick_ID'Img);
             else
                Clear (Support_Set);
                for B2 in Iterate (Brick_Stack (Z)) loop
@@ -206,7 +210,6 @@ procedure December_22 is
                   -- To be a subset at least one other brick must support all
                   -- bricks supported by Element (B).
                   Count := @ + 1;
-               Put_Line ("Alternative Support" & Element (B).Brick_ID'Img);
                end if; -- Is_Subset (Element (B).Support_Set, Support_Set)
             end if; -- Element (B).Is_Top
          end loop; -- B in Iterate (Brick_Stack (Z))
@@ -219,6 +222,7 @@ procedure December_22 is
 
 begin -- December_22
    Read_input (Brick_Store);
+   Brick_Sort.Sort (Brick_Store);
    for B in Iterate (Brick_Store) loop
       Drop (Element (B), To_Index (B), Brick_Stack);
    end loop; -- B in Iterate (Brick_Store)
