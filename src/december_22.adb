@@ -9,6 +9,8 @@ with Ada.Containers.Doubly_Linked_Lists;
 with Ada.Containers.Vectors;
 with Ada.Containers.Ordered_Maps;
 with Ada.Containers.Ordered_Sets;
+with Ada.Containers.Synchronized_Queue_Interfaces;
+with Ada.Containers.Unbounded_Synchronized_Queues;
 with DJH.Execution_Time; use DJH.Execution_Time;
 
 procedure December_22 is
@@ -41,6 +43,7 @@ procedure December_22 is
       Is_Top : Boolean := True;
       Brick_ID : Brick_IDs;
       Support_Set : Support_Sets.Set := Support_Sets.Empty_Set;
+      Can_Disintergrate : Boolean := False;
    end record; -- Dropped_Bricks
 
    package Dropped_Brick_Lists is new
@@ -188,8 +191,11 @@ procedure December_22 is
       end if; -- not Has_Collision
    end Drop;
 
-   function Can_Disintergrate (Brick_Stack : in Brick_Stacks.Map)
+   function Can_Disintergrate (Brick_Stack : in out Brick_Stacks.Map)
                                return Natural is
+
+      -- Has a side effect of setting the Can_Disintergrate flag.
+
       Count : Natural := 0;
       Support_Set : Support_Sets.Set;
 
@@ -198,24 +204,105 @@ procedure December_22 is
          for B in Iterate (Brick_Stack (Z)) loop
             if Element (B).Is_Top then
                Count := @ + 1;
+               Brick_Stack (Z) (B).Can_Disintergrate := True;
             else
                Clear (Support_Set);
                for B2 in Iterate (Brick_Stack (Z)) loop
                   if Element (B).Brick_ID /= Element (B2).Brick_ID then
                      Support_Set :=
                        Union (Support_Set, Element (B2).Support_Set);
-                  end if; -- B2 in  Iterate (Brick_Stack (Z))
-               end loop; -- B2 in Iterate (Brick_Stack (Z2))
+                  end if; -- Element (B).Brick_ID /= Element (B2).Brick_ID
+               end loop; -- B2 in Iterate (Brick_Stack (Z))
                if Is_Subset (Element (B).Support_Set, Support_Set) then
                   -- To be a subset at least one other brick must support all
                   -- bricks supported by Element (B).
                   Count := @ + 1;
+                  Brick_Stack (Z) (B).Can_Disintergrate := True;
                end if; -- Is_Subset (Element (B).Support_Set, Support_Set)
             end if; -- Element (B).Is_Top
          end loop; -- B in Iterate (Brick_Stack (Z))
       end loop; -- Z in Iterate (Brick_Stack)
       return Count;
    end Can_Disintergrate;
+
+   function Will_Drop (Brick_Stack : in Brick_Stacks.Map)
+                       return Count_Type is
+
+      type Brick_Addresses is record
+         Zc : Brick_Stacks.Cursor;
+         Bc : Dropped_Brick_Lists.Cursor;
+      end record; -- Brick_Addresses;
+
+      package Brick_Indices is new
+        Ada.Containers.Ordered_Maps (Brick_IDs, Brick_Addresses);
+      use Brick_Indices;
+
+      function One_Drop (Brick_ID : in Brick_IDs;
+                         Brick_Index : Brick_Indices.Map;
+                         Brick_Stack : in Brick_Stacks.Map)
+                         return Count_Type is
+
+         package Q_Int is new
+           Ada.Containers.Synchronized_Queue_Interfaces (Support_Sets.Set);
+         use Q_Int;
+
+         package Queues is new
+           Ada.Containers.Unbounded_Synchronized_Queues (Q_Int);
+         use Queues;
+
+         Queue : Queues.Queue;
+         Current, Support_Set, Unsupported : Support_Sets.Set;
+         Fallen, Enqueued : Support_Sets.Set := Support_Sets.Empty_Set;
+
+      begin -- One_Drop
+         Put_Line ("Enqueue:" & Brick_ID'Img);
+         Queue.Enqueue (Brick_Stack (Brick_Index (Brick_ID).Zc)
+                        (Brick_Index (Brick_ID).Bc).Support_Set);
+         include (Enqueued, Brick_ID);
+         while Queue.Current_Use > 0 loop
+            Queue.Dequeue (Current);
+            Clear (Support_Set);
+            for B in Iterate (Brick_Stack (Brick_Index (
+                              First_Element (Current)).Zc)) loop
+               if not Contains (Current, Element (B).Brick_ID) then
+                  Support_Set :=
+                    Union (Support_Set, Element (B).Support_Set);
+               end if; -- Current /= Element (B).Brick_ID
+            end loop; -- B in Iterate (Brick_Stack (Brick_Index (Current).Zc))
+            Unsupported := Difference (Current, Support_Set);
+            Fallen := Union (Fallen, Unsupported);
+            Put_Line ("Support_Set: " & Support_Set'Img);
+            Put_Line ("Current: " & Current'Img);
+            Put_Line ("Un_Supported: " & Unsupported'Img);
+            for U in Iterate (UnSupported) loop
+               if not Brick_Stack (Brick_Index (Element (U)).Zc)
+                 (Brick_Index (Element (U)).Bc).Is_Top and not
+                 Contains (Enqueued, Element (U)) then
+                  Queue.Enqueue (Brick_Stack (Brick_Index (Element (U)).Zc)
+                                 (Brick_Index (Element (U)).Bc).Support_Set);
+               end if; -- not Brick_Stack (Brick_Index (Element (U)).Zc) ...
+            end loop; -- U in Iterate (Un_Supported)
+         end loop; -- Queue.Current_Use > 0
+         return Length (Fallen);
+      end One_Drop;
+
+      Brick_Index : Brick_Indices.Map := Brick_Indices.Empty_Map;
+      Count : Count_Type := 0;
+
+   begin -- Will_Drop
+      for Zc in Iterate (Brick_Stack) loop
+         for Bc in Iterate (Brick_Stack (Zc)) loop
+            insert (Brick_Index, Element (Bc).Brick_ID, (Zc, Bc));
+         end loop; -- Bc in Iterate (Brick_Stack (Zc))
+      end loop; -- Zc in Iterate (Brick_Stack)
+      for B in Iterate (Brick_Index) loop
+         if not Brick_Stack (Brick_Index (B).Zc)
+           (Brick_Index (B).Bc).Can_Disintergrate then
+            Count := @ + One_Drop (Key (B), Brick_Index, Brick_Stack);
+         end if; -- not Brick_Stack (Brick_Index (B).Zc) ...
+      end loop; -- B in Iterate (Brick_Index)
+      return Count;
+   end Will_Drop;
 
    Brick_Store : Brick_Stores.Vector;
    Brick_Stack : Brick_Stacks.Map := Brick_Stacks.Empty_Map;
@@ -228,6 +315,6 @@ begin -- December_22
    end loop; -- B in Iterate (Brick_Store)
    Put_Line ("Part one:" & Can_Disintergrate (Brick_Stack)'Img);
    DJH.Execution_Time.Put_CPU_Time;
-   Put_Line ("Part two:");
+   Put_Line ("Part two:" & Will_Drop (Brick_Stack)'Img);
    DJH.Execution_Time.Put_CPU_Time;
 end December_22;
