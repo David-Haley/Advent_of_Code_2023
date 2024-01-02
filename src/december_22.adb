@@ -42,8 +42,7 @@ procedure December_22 is
       P1, P2 : Points;
       Is_Top : Boolean := True;
       Brick_ID : Brick_IDs;
-      Support_Set : Support_Sets.Set := Support_Sets.Empty_Set;
-      Can_Disintergrate : Boolean := False;
+      Support_Set, Resting_On : Support_Sets.Set := Support_Sets.Empty_Set;
    end record; -- Dropped_Bricks
 
    package Dropped_Brick_Lists is new
@@ -151,6 +150,7 @@ procedure December_22 is
 
       procedure Place (Brick : in Bricks;
                        Brick_ID : in Brick_IDs;
+                       Resting_On : in Support_Sets.Set;
                        Z : in Ordinates;
                        Brick_Stack : in out Brick_Stacks.Map) is
 
@@ -162,6 +162,7 @@ procedure December_22 is
          Dropped_Brick.P1.Z := Z;
          Dropped_Brick.P2.Z := Z - Brick.P1.Z + Brick.P2.Z;
          Dropped_Brick.Brick_ID := Brick_ID;
+         Dropped_Brick.Resting_On := Copy (Resting_On);
          if not Contains (Brick_Stack, Dropped_Brick.P2.Z) then
             Insert (Brick_Stack, Dropped_Brick.P2.Z,
                     Dropped_Brick_Lists.Empty_List);
@@ -170,25 +171,26 @@ procedure December_22 is
       end Place;
 
       Zc : Brick_Stacks.Cursor := Last (Brick_Stack);
-      Has_Collision : Boolean := False;
+      Resting_On : Support_Sets.Set;
 
    begin -- Drop
-      while Zc /= Brick_Stacks.No_Element and not Has_Collision loop
+      while Zc /= Brick_Stacks.No_Element and Is_Empty (Resting_On) loop
+         Clear (Resting_On);
          for Dc in Iterate (Brick_Stack (Zc)) loop
             if Collide (Brick, Brick_Stack (Zc) (Dc)) then
                Brick_Stack (Zc) (Dc).Is_Top := False;
-               Has_Collision := True;
+               Include (Resting_On, Brick_Stack (Zc) (Dc).Brick_ID);
                Insert (Brick_Stack (Zc) (Dc).Support_Set, Brick_ID);
             end if; -- Collide (Brick_Stack (Zc) (Dc), Brick)
          end loop; -- Dc in Iterate (Brick_Stack (Zc))
-         if Has_Collision then
-            Place (Brick, Brick_ID, Key (Zc) + 1, Brick_Stack);
+         if not Is_Empty (Resting_On) then
+            Place (Brick, Brick_ID, Resting_On, Key (Zc) + 1, Brick_Stack);
          end if; -- Has_Collision
          Previous (Zc);
-      end loop; -- Zc /= Brick_Stacks.No_Element and not Has_Collision
-      if not Has_Collision then
-         Place (Brick, Brick_ID, 1, Brick_Stack);
-      end if; -- not Has_Collision
+      end loop; -- Zc /= Brick_Stacks.No_Element and Is_Empty (Resting_On)
+      if Is_Empty (Resting_On) then
+         Place (Brick, Brick_ID, Resting_On, 1, Brick_Stack);
+      end if; -- Is_Empty (Resting_On)
    end Drop;
 
    function Can_Disintergrate (Brick_Stack : in out Brick_Stacks.Map)
@@ -204,7 +206,6 @@ procedure December_22 is
          for B in Iterate (Brick_Stack (Z)) loop
             if Element (B).Is_Top then
                Count := @ + 1;
-               Brick_Stack (Z) (B).Can_Disintergrate := True;
             else
                Clear (Support_Set);
                for B2 in Iterate (Brick_Stack (Z)) loop
@@ -217,7 +218,6 @@ procedure December_22 is
                   -- To be a subset at least one other brick must support all
                   -- bricks supported by Element (B).
                   Count := @ + 1;
-                  Brick_Stack (Z) (B).Can_Disintergrate := True;
                end if; -- Is_Subset (Element (B).Support_Set, Support_Set)
             end if; -- Element (B).Is_Top
          end loop; -- B in Iterate (Brick_Stack (Z))
@@ -228,18 +228,12 @@ procedure December_22 is
    function Will_Drop (Brick_Stack : in Brick_Stacks.Map)
                        return Count_Type is
 
-      type Brick_Addresses is record
-         Zc : Brick_Stacks.Cursor;
-         Bc : Dropped_Brick_Lists.Cursor;
-      end record; -- Brick_Addresses;
-
       package Brick_Indices is new
-        Ada.Containers.Ordered_Maps (Brick_IDs, Brick_Addresses);
+        Ada.Containers.Ordered_Maps (Brick_IDs, Dropped_Bricks);
       use Brick_Indices;
 
       function One_Drop (Brick_ID : in Brick_IDs;
-                         Brick_Index : Brick_Indices.Map;
-                         Brick_Stack : in Brick_Stacks.Map)
+                         Brick_Index : Brick_Indices.Map)
                          return Count_Type is
 
          package Q_Int is new
@@ -251,38 +245,21 @@ procedure December_22 is
          use Queues;
 
          Queue : Queues.Queue;
-         Current, Support_Set, Unsupported : Support_Sets.Set;
-         Fallen, Enqueued : Support_Sets.Set := Support_Sets.Empty_Set;
+         Current : Support_Sets.Set;
+         Fallen : Support_Sets.Set := To_Set (Brick_ID);
 
       begin -- One_Drop
-         Put_Line ("Enqueue:" & Brick_ID'Img);
-         Queue.Enqueue (Brick_Stack (Brick_Index (Brick_ID).Zc)
-                        (Brick_Index (Brick_ID).Bc).Support_Set);
-         include (Enqueued, Brick_ID);
+         Queue.Enqueue (Brick_Index (Brick_ID).Support_Set);
          while Queue.Current_Use > 0 loop
             Queue.Dequeue (Current);
-            Clear (Support_Set);
-            for B in Iterate (Brick_Stack (Brick_Index (
-                              First_Element (Current)).Zc)) loop
-               if not Contains (Current, Element (B).Brick_ID) then
-                  Support_Set :=
-                    Union (Support_Set, Element (B).Support_Set);
-               end if; -- Current /= Element (B).Brick_ID
-            end loop; -- B in Iterate (Brick_Stack (Brick_Index (Current).Zc))
-            Unsupported := Difference (Current, Support_Set);
-            Fallen := Union (Fallen, Unsupported);
-            Put_Line ("Support_Set: " & Support_Set'Img);
-            Put_Line ("Current: " & Current'Img);
-            Put_Line ("Un_Supported: " & Unsupported'Img);
-            for U in Iterate (UnSupported) loop
-               if not Brick_Stack (Brick_Index (Element (U)).Zc)
-                 (Brick_Index (Element (U)).Bc).Is_Top and not
-                 Contains (Enqueued, Element (U)) then
-                  Queue.Enqueue (Brick_Stack (Brick_Index (Element (U)).Zc)
-                                 (Brick_Index (Element (U)).Bc).Support_Set);
-               end if; -- not Brick_Stack (Brick_Index (Element (U)).Zc) ...
-            end loop; -- U in Iterate (Un_Supported)
+            for S in Iterate (Current) loop
+               if Is_Subset (Brick_Index (Element (S)).Resting_On, Fallen) then
+                  Queue.Enqueue (Brick_index (Element (S)).Support_Set);
+                  include (Fallen, Element (S));
+               end if; -- Is_Subset (Brick_Index (Element (S)).Resting_On ...
+            end loop; -- S in Iterate (Current)
          end loop; -- Queue.Current_Use > 0
+         Exclude (Fallen, Brick_ID);
          return Length (Fallen);
       end One_Drop;
 
@@ -292,14 +269,13 @@ procedure December_22 is
    begin -- Will_Drop
       for Zc in Iterate (Brick_Stack) loop
          for Bc in Iterate (Brick_Stack (Zc)) loop
-            insert (Brick_Index, Element (Bc).Brick_ID, (Zc, Bc));
+            insert (Brick_Index, Element (Bc).Brick_ID, Element (Bc));
          end loop; -- Bc in Iterate (Brick_Stack (Zc))
       end loop; -- Zc in Iterate (Brick_Stack)
       for B in Iterate (Brick_Index) loop
-         if not Brick_Stack (Brick_Index (B).Zc)
-           (Brick_Index (B).Bc).Can_Disintergrate then
-            Count := @ + One_Drop (Key (B), Brick_Index, Brick_Stack);
-         end if; -- not Brick_Stack (Brick_Index (B).Zc) ...
+         if not Element (B).Is_Top then
+            Count := @ + One_Drop (Key (B), Brick_Index);
+         end if; -- not Element (B).Is_Top
       end loop; -- B in Iterate (Brick_Index)
       return Count;
    end Will_Drop;
