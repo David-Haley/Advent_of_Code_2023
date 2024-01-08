@@ -4,6 +4,7 @@ with Ada.Text_IO.Unbounded_IO; use Ada.Text_IO.Unbounded_IO;
 with Ada.Strings; use Ada.Strings;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Ada.Containers; use Ada.Containers;
+with Ada.Containers.Doubly_Linked_Lists;
 with Ada.Containers.Ordered_Maps;
 with Ada.Containers.Ordered_Sets;
 with Ada.Containers.Synchronized_Queue_Interfaces;
@@ -12,8 +13,7 @@ with DJH.Execution_Time; use DJH.Execution_Time;
 
 procedure December_23 is
 
-   subtype Ordinates is Natural; -- Allows for doing inclusion test without
-   -- testing coordinates first;
+   subtype Ordinates is Positive;
 
    type Paths is (Flat, North, East, South, West);
 
@@ -34,6 +34,21 @@ procedure December_23 is
    -- Allows direct matching between direction and path;
 
    subtype Steps is Natural;
+
+   type Junctions is record
+      Coordinate : Coordinates;
+      Step : Steps;
+   end record; -- Junction;
+
+   package Junction_Lists is new Ada.Containers.Doubly_Linked_Lists (Junctions);
+   use Junction_Lists;
+
+   package Junction_Maps is new
+     Ada.Containers.Ordered_Maps (Coordinates, Junction_Lists.List);
+   use Junction_Maps;
+
+   package Visited_Sets is new Ada.Containers.Ordered_Sets (Coordinates);
+   use Visited_Sets;
 
    procedure Read_Input (Island_Map : out Island_Maps.Map;
                          X_Low, Y_Low, X_High, Y_High : out Ordinates) is
@@ -87,18 +102,17 @@ procedure December_23 is
       Close (Input_File);
    end Read_input;
 
-   function Most_Senic (Island_Map : in Island_Maps.Map;
-                        X_Low, Y_Low, X_High, Y_High : in Ordinates;
-                        Part_2 : Boolean := False)
-                        return Steps is
+   procedure Build_Junctions (Island_Map : in Island_Maps.Map;
+                              X_Low, Y_Low, X_High, Y_High : in Ordinates;
+                              Junction_Map : out Junction_Maps.Map;
+                              Part_2 : Boolean := False) is
 
-      package Visited_Sets is new Ada.Containers.Ordered_Sets (Coordinates);
-      use Visited_Sets;
+      package Options is new Ada.Containers.Ordered_Sets (Directions);
+      use Options;
 
       type Search_Elements is record
          Coordinate : Coordinates;
          Step : Steps;
-         Visited_Set : Visited_Sets.Set := Visited_Sets.Empty_Set;
       end record; --Search_Elements
 
       package Queue_Interface is new
@@ -109,107 +123,185 @@ procedure December_23 is
         Ada.Containers.Unbounded_Synchronized_Queues (Queue_Interface);
       use Search_Queue;
 
-      Queue : Search_Queue.Queue;
+      procedure Find_Junctions (Island_Map : in Island_Maps.Map;
+                                Junction_Map : out Junction_Maps.Map) is
 
-      procedure Conditional_Enqueue (Current_SE : in Search_Elements;
-                                     Direction : in Directions;
-                                     Island_Map : in Island_Maps.Map) is
+         Path_Count : Natural;
 
-         Next_SE : Search_Elements :=
-           (Current_SE.Coordinate, Current_SE.Step + 1,
-            copy (Current_SE.Visited_Set));
+      begin -- Find_Junctions
+         Clear (Junction_Map);
+         for I in Iterate (Island_Map) loop
+            Path_Count := 0;
+            if Key (I).X > Ordinates'First and then
+              Contains (Island_Map, (Key (I).X - 1, Key (I).Y)) then
+               Path_Count := @ + 1;
+            end if; -- Key (I).X > Ordinates'First and then ...
+            if Contains (Island_Map, (Key (I).X + 1, Key (I).Y)) then
+               Path_Count := @ + 1;
+            end if; -- Contains (Island_Map, (Key (I).X + 1, Key (I).Y))
+            if Key (I).Y > Ordinates'First and then
+              Contains (Island_Map, (Key (I).X, Key (I).Y - 1)) then
+               Path_Count := @ + 1;
+            end if; -- Key (I).Y > Ordinates'First and then ...
+            if Contains (Island_Map, (Key (I).X, Key (I).Y + 1)) then
+               Path_Count := @ + 1;
+            end if; -- Contains (Island_Map, (Key (I).X, Key (I).Y + 1))
+            if Path_Count >= 3 then
+               insert (Junction_Map, Key (I), Junction_Lists.Empty_List);
+            end if; -- Path_Count >= 3
+         end loop; -- I in Iterate (Island_Map);
+         -- Searches also start and end at the entrance and exit
+         insert (Junction_Map, (X_Low, Y_Low),
+                 Junction_Lists.Empty_List);
+         insert (Junction_Map, (X_High, Y_High),
+                 Junction_Lists.Empty_List);
+      end Find_Junctions;
 
-      begin -- Conditional_Enqueue
-         case Direction is
-         when North =>
-            if Current_SE.Coordinate.Y > Ordinates'First then
-               Next_SE.Coordinate.Y := @ - 1;
-            end if; -- Current_SE.Coordinate.Y > Ordinates'First
-         when East =>
-            if Current_SE.Coordinate.X < X_High then
-               Next_SE.Coordinate.X := @ + 1;
-            end if; -- Current_SE.Coordinate.X < X_High
-         when South =>
-            if Current_SE.Coordinate.Y < Y_High then
-               Next_SE.Coordinate.Y := @ + 1;
-            end if; -- Current_SE.Coordinate.Y > Ordinates'First
-         when West =>
-            if Current_SE.Coordinate.X > Ordinates'First then
-               Next_SE.Coordinate.X := @ - 1;
-            end if; -- Current_SE.Coordinate.X < X_High
-         end case;
-         if Contains (Island_Map, Next_SE.Coordinate) and then
-           not Contains (Next_SE.Visited_Set, Next_SE.Coordinate) then
-            insert (Next_SE.Visited_Set, Next_SE.Coordinate);
-            Queue.Enqueue (Next_SE);
-         end if; -- not Contains (Visited_Map, Next_SE.Coordinate).
-      end Conditional_Enqueue;
+      procedure Find_Options (Current_SE : in Search_Elements;
+                              Island_Map : in Island_Maps.Map;
+                              Visited_Set : in Visited_Sets.Set;
+                              Option : out Options.Set;
+                              Part_2 : in Boolean) is
 
-      pragma Inline_Always (Conditional_Enqueue);
+         Test : Coordinates;
+         Valid : Boolean;
 
-      procedure Put (Island_Map : in Island_Maps.Map;
-                     Visited_Set : Visited_Sets.Set;
-                     X_Low, Y_Low, X_High, Y_High : in Ordinates) is
-
-      begin -- Put
-         for Y in Natural range Y_Low .. Y_High loop
-            for X in Natural range X_Low .. X_High loop
-               if Contains (Visited_Set, (X, Y)) then
-                  Put ('O');
-               elsif Contains (Island_Map, (X, Y)) then
-                  case Island_Map ((X, Y)) is
-                     when Flat => Put ('.');
-                     when North => Put ('^');
-                     when East => Put ('>');
-                     when South => Put ('V');
-                     when West => Put ('<');
-                  end case;
+      begin -- Find_Options
+         Clear (Option);
+         for Direction in Directions loop
+            Valid := True;
+            Test := Current_SE.Coordinate;
+            case Direction is
+            when North =>
+               if Current_SE.Coordinate.Y > Ordinates'First then
+                  Test.Y := @ - 1;
                else
-                  Put ('#');
-               end if;
-            end loop;
-            New_Line;
-         end loop;
-         New_Line;
-      end Put;
+                  Valid := False;
+               end if; -- Current_SE.Coordinate.Y > Ordinates'First
+            when East =>
+               if Current_SE.Coordinate.X < X_High then
+                  Test.X := @ + 1;
+               else
+                  Valid := False;
+               end if; -- Current_SE.Coordinate.X < X_High
+            when South =>
+               if Current_SE.Coordinate.Y < Y_High then
+                  Test.Y := @ + 1;
+               else
+                  Valid := False;
+               end if; -- Current_SE.Coordinate.Y > Ordinates'First
+            when West =>
+               if Current_SE.Coordinate.X > Ordinates'First then
+                  Test.X := @ - 1;
+               else
+                  Valid := False;
+               end if; -- Current_SE.Coordinate.X < X_High
+            end case; -- Direction
+            if Valid and then (Contains (Island_Map, Test) and
+                                 not Contains (Visited_Set, Test)) and then
+              (Part_2 or else Island_Map (Test) = Flat or else
+               Island_Map (Test) = Direction)
+            then
+               insert (Option, Direction);
+            end if; -- Valid and then (Contains (Island_Map, Test) and ...
+         end loop; -- Direction in Directions
+      end Find_Options;
 
-      Current_SE : Search_Elements := ((X_Low, Y_Low), 0,
-                                       Visited_Sets.Empty_Set);
-      Result : Steps := 0;
+      Option : Options.Set;
+      Queue : Search_Queue.Queue;
+      Current_SE, Test : Search_Elements;
+      Visited_Set : Visited_Sets.Set;
 
-   begin -- Most_Senic
-      Insert (Current_SE.Visited_Set, Current_SE.Coordinate);
-      Queue.Enqueue (Current_SE);
-      While Queue.Current_Use > 0 loop
-         Queue.Dequeue (Current_SE);
-         if Current_SE.Coordinate = (X_High, Y_High) then
-            Put_Line (Current_SE.Step'Img);
-            if Current_SE.Step > Result then
-               Result := Current_SE.Step;
-               Put (Island_Map, Current_SE.Visited_Set, X_Low, Y_Low, X_High, Y_High);
-            end if; --Current_SE.Step > Result
-         elsif Island_Map (Current_SE.Coordinate) = Flat or Part_2 then
-            Conditional_Enqueue (Current_SE, North, Island_Map);
-            Conditional_Enqueue (Current_SE, East, Island_Map);
-            Conditional_Enqueue (Current_SE, South, Island_Map);
-            Conditional_Enqueue (Current_SE, West, Island_Map);
+   begin -- Build_Junctions
+      Clear (Junction_Map);
+      Find_Junctions (Island_Map, Junction_Map);
+      for J in Iterate (Junction_Map) loop
+         Clear (Visited_Set);
+         Current_SE.Coordinate := Key (J);
+         Current_SE.Step := 0;
+         Insert (Visited_Set, Key (J));
+         Queue.Enqueue (Current_SE);
+         While Queue.Current_Use > 0 loop
+            Queue.Dequeue (Current_SE);
+            if Current_SE.Coordinate /= Key (J) and then
+              Contains (Junction_Map, Current_SE.Coordinate) then
+               Append (Junction_Map (Key (J)),
+                       (Current_SE.Coordinate, Current_SE.Step));
+               -- Search terminates when a junction is found
+            else
+               Find_Options (Current_SE, Island_Map, Visited_Set, Option,
+                             Part_2);
+               Test.Step := Current_SE.Step + 1;
+               for O in Iterate (Option) loop
+                  Test.Coordinate := Current_SE.Coordinate;
+                  case Element (O) is
+                  when North =>
+                     Test.Coordinate.Y := @ - 1;
+                  when East =>
+                     Test.Coordinate.X := @ + 1;
+                  when South =>
+                     Test.Coordinate.Y := @ + 1;
+                  when West =>
+                     Test.Coordinate.X := @ - 1;
+                  end case;
+                  Include (Visited_Set, Test.Coordinate);
+                  Queue.Enqueue (Test);
+               end loop; -- O in Iterate (Option)
+            end if; -- Current_SE.Coordinate /= Key (J) and then ...
+         end loop; -- Queue.Current_Use > 0
+      end loop; -- J in Iterate (Junction_Map)
+   end Build_Junctions;
+
+   function Most_Scenic (Junction_Map : in Junction_Maps.Map;
+                         X_Low, Y_Low, X_High, Y_High : in Ordinates)
+                         return Natural is
+
+      procedure Find (Junction_Map : in Junction_Maps.Map;
+                      Start : in Coordinates;
+                      X_High, Y_High : in Ordinates;
+                      Length : in Natural;
+                      Visited_Set : in out Visited_Sets.Set;
+                      Longest : in out Natural) is
+
+      begin -- Find
+         if Start = (X_High, Y_High) then
+            if Longest < Length then
+               Longest := Length;
+            end if; -- Longest < Length
          else
-            Conditional_Enqueue (Current_SE, Island_Map (Current_SE.Coordinate),
-                                 Island_Map);
-         end if; -- Island_Map (Current_SE.Coordinate)
-      end loop; -- Queue.Current_Use > 0
-      Return Result;
-   end Most_Senic;
+            for S in Iterate (Junction_Map (Start)) loop
+               if not Contains (Visited_Set, Element (S).Coordinate) then
+                  Include (Visited_Set, Element (S).Coordinate);
+                  Find (Junction_Map, Element (S).Coordinate, X_High, Y_High,
+                        Length + Element (S).Step, Visited_Set, Longest);
+                  Exclude (Visited_Set, Element (S).Coordinate);
+               end if; -- not Contains (Visited_Set, Element (S).Coordinate)
+            end loop; -- S in Iterate (Junction_Map (Start))
+         end if; -- Start = (X_High, Y_High)
+      end Find;
+
+      Longest : Natural := 0;
+      Visited_Set : Visited_Sets.Set := To_Set ((X_Low, Y_Low));
+
+   begin -- Most_Scenic
+      Find (Junction_Map, (X_Low, Y_Low), X_High, Y_High, 0, Visited_Set,
+            Longest);
+      return Longest;
+   end Most_Scenic;
 
    Island_Map : Island_Maps.Map;
    X_Low, Y_Low, X_High, Y_High : Ordinates;
+   Junction_Map : Junction_Maps.Map;
 
 begin -- December_23
    Read_input (Island_Map, X_Low, Y_Low, X_High, Y_High);
+   Build_Junctions (Island_Map, X_Low, Y_Low, X_High, Y_High, Junction_Map);
    Put_Line ("Part one:" &
-               Most_Senic (Island_Map, X_Low, Y_Low, X_High, Y_High)'Img);
+               Most_Scenic (Junction_Map, X_Low, Y_Low, X_High, Y_High)'Img);
    DJH.Execution_Time.Put_CPU_Time;
+   Build_Junctions (Island_Map, X_Low, Y_Low, X_High, Y_High, Junction_Map,
+                    True);
    Put_Line ("Part two:" &
-               Most_Senic (Island_Map, X_Low, Y_Low, X_High, Y_High, True)'Img);
+               Most_Scenic (Junction_Map, X_Low, Y_Low, X_High, Y_High)'Img);
    DJH.Execution_Time.Put_CPU_Time;
 end December_23;
