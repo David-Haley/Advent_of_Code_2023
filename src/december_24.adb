@@ -20,10 +20,6 @@ procedure December_24 is
       Vx, Vy, Vz : My_Float;
    end record; -- Hail_Stones
 
-   type Lines is record
-      X1, Y1, X2, Y2 : My_Float;
-   end record; -- Lines
-
    package Hail_Stone_Lists is new
      Ada.Containers.Doubly_Linked_Lists (Hail_Stones);
    use Hail_Stone_Lists;
@@ -44,18 +40,17 @@ procedure December_24 is
          Open (Input_File, In_File, "december_24.txt");
       else
          Open (Input_File, In_File, Argument(1));
-         if Argument_Count = 3 then
-            Lower_Bound := My_Float'Value (Argument (2));
-            Upper_Bound := My_Float'Value (Argument (3));
-         else
-            Lower_Bound := 200000000000000.0;
-            Upper_Bound := 400000000000000.0;
-         end if; -- Argument_Count = 3
       end if; -- Argument_Count = 0
+      if Argument_Count = 3 then
+         Lower_Bound := My_Float'Value (Argument (2));
+         Upper_Bound := My_Float'Value (Argument (3));
+      else
+         Lower_Bound := 200000000000000.0;
+         Upper_Bound := 400000000000000.0;
+      end if; -- Argument_Count = 3
       Clear (Hail_Stone_List);
       while not End_Of_File (Input_File) loop
          Get_Line (Input_File, Text);
-         Put_Line (Text);
          Start_At := + 1;
          Find_Token (Text, Delimiters, Start_at, Outside, First, Last);
          Hail_Stone.Px := My_Float'Value (Slice (Text, First, Last) & ".0");
@@ -80,42 +75,68 @@ procedure December_24 is
       Close (Input_File);
    end Read_input;
 
-   procedure In_Box_Line (Hail_Stone : in Hail_Stones;
-                          Lower_Bound, Upper_Bound : in My_Float;
-                          Line : out Lines;
-                          Valid : out Boolean) is
+   procedure Solve_For_X_Y (Stone_1, Stone_2 : in Hail_Stones;
+                           No_Intersection : out Boolean;
+                           X, Y : out My_Float) is
 
-      Txl, Txu, Tyl, Tyu : My_Float;
-      -- times when the hail stone crosses the X and Y bounds, negative times
-      -- can be ignored. This occurs if the hail stone in inside the box at
-      -- t = 0. Further checks are required to find the if the actual crossings.
+      -- Lines in the form Ax + By = C
+      -- equations rearranged such that B = 1
+      A1 : constant My_Float := - Stone_1.Vy / Stone_1.Vx;
+      C1 : constant My_Float :=
+        Stone_1.Py - Stone_1.Px * Stone_1.Vy/ Stone_1.Vx;
+      A2 : constant My_Float := - Stone_2.Vy / Stone_2.Vx;
+      C2 : constant My_Float :=
+        Stone_2.Py - Stone_2.Px * Stone_2.Vy / Stone_2.Vx;
+      Denominator : constant My_Float := A1 - A2;
+      T1, T2 : My_Float;
 
-   begin -- In_Box_Line
-      Valid := False;
-      Line := (0.0, 0.0, 0.0, 0.0);
-      Txl := (Lower_Bound - Hail_Stone.Px) / Hail_Stone.Vx;
-      Txu := (Upper_Bound - Hail_Stone.Px) / Hail_Stone.Vx;
-      Tyl := (Lower_Bound - Hail_Stone.Py) / Hail_Stone.Vy;
-      Tyu := (Upper_Bound - Hail_Stone.Py) / Hail_Stone.Vy;
-      Put_Line (Txl'Img & Txu'Img & Tyl'Img & Tyu'Img);
-      Put_Line ("(" & My_Float'Image (Hail_Stone.Px + Hail_Stone.Vx * Txl) & "," & My_Float'Image (Hail_Stone.Py + Hail_Stone.Vy * Txl) & ")");
-      Put_Line ("(" & My_Float'Image (Hail_Stone.Px + Hail_Stone.Vx * Txu) & "," & My_Float'Image (Hail_Stone.Py + Hail_Stone.Vy * Txu) & ")");
-      Put_Line ("(" & My_Float'Image (Hail_Stone.Px + Hail_Stone.Vx * Tyl) & "," & My_Float'Image (Hail_Stone.Py + Hail_Stone.Vy * Tyl) & ")");
-      Put_Line ("(" & My_Float'Image (Hail_Stone.Px + Hail_Stone.Vx * Tyu) & "," & My_Float'Image (Hail_Stone.Py + Hail_Stone.Vy * Tyu) & ")");
-   end In_Box_Line;
+   begin -- Solve_For_X_Y
+      No_Intersection := Denominator = 0.0;
+      if No_Intersection then
+         X := 0.0; -- not a result but a valid real
+         Y := 0.0;
+      else
+         X := (C1 - C2) / Denominator;
+         Y := (A1 * C2 - A2 * C1) / Denominator;
+         T1 := (X - Stone_1.Px) / Stone_1.Vx;
+         T2 := (X - Stone_2.Px) / Stone_2.Vx;
+         No_Intersection := T1 < 0.0 or T2 < 0.0;
+         -- Intersection was prior to t = 0.0
+      end if; -- No_Intersection
+   end Solve_For_X_Y;
+
+   function Count_Intersections (Hail_Stone_List : in Hail_Stone_Lists.List;
+                                 Lower_Bound, Upper_Bound : in My_Float)
+                                 return Natural is
+
+      No_intersection : Boolean;
+      S2 : Hail_Stone_Lists.Cursor;
+      X, Y : My_Float;
+      Count : Natural := 0;
+
+   begin -- Count_Intersections
+      for S1 in Iterate (Hail_Stone_List) loop
+         S2 := Next (S1);
+         while S2 /= Hail_Stone_Lists.No_Element loop
+            Solve_For_X_Y (Element (S1), Element (S2), No_intersection, X, Y);
+            if not No_intersection and then
+              (Lower_Bound <= X and X <= Upper_Bound and
+                 Lower_Bound <= Y and Y <= Upper_Bound) then
+               Count := @ + 1;
+            end if; -- not No_intersection and then ...
+            Next (S2);
+         end loop; -- S2 in Iterate (Hail_Stone_List, Next (S1)
+      end loop; -- S1 in Iterate (Hail_Stone_List)
+      return Count;
+   end Count_Intersections;
 
    Hail_Stone_List : Hail_Stone_Lists.List;
    Lower_Bound, Upper_Bound : My_Float;
-   Line : Lines;
-   Valid : Boolean;
 
 begin -- December_24
    Read_input (Hail_Stone_List, Lower_Bound, Upper_Bound);
-   Put_Line (Hail_Stone_List'Img);
-   for H in Iterate (Hail_Stone_List) loop
-      In_Box_Line (Element (H), Lower_Bound, Upper_Bound, Line, Valid);
-   end loop; -- H in Iterate (Hail_Stone_List)
-   Put_Line ("Part one:");
+   Put_Line ("Part one:" & Count_Intersections (Hail_Stone_List, Lower_Bound,
+             Upper_Bound)'Img);
    DJH.Execution_Time.Put_CPU_Time;
    Put_Line ("Part two:");
    DJH.Execution_Time.Put_CPU_Time;
