@@ -8,13 +8,15 @@ with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Ada.Containers; use Ada.Containers;
 with Ada.Containers.Doubly_Linked_Lists;
 with Ada.Containers.Ordered_Maps;
+with Ada.Containers.Ordered_Sets;
 with Interfaces; use Interfaces;
 with DJH.Execution_Time; use DJH.Execution_Time;
 
 procedure December_18 is
 
+   subtype Long_Natural is Long_Long_Integer range 0 .. Long_Long_Integer'Last;
+
    subtype Ordinates is integer;
-   -- allows 0 to be off map
 
    type Coordinates is record
       X, Y : Ordinates;
@@ -49,6 +51,13 @@ procedure December_18 is
    package Dig_Plans is new
      Ada.Containers.Doubly_Linked_Lists (Dig_Plan_Elements);
    use Dig_Plans;
+
+   package Corner_Sets is new Ada.Containers.Ordered_Sets (Coordinates);
+   use Corner_Sets;
+
+   package Corners is new
+     Ada.Containers.Ordered_Maps (Ordinates, Corner_Sets.Set);
+   use Corners;
 
    procedure Read_input (Dig_Plan : out Dig_Plans.List) is
 
@@ -130,51 +139,6 @@ procedure December_18 is
       end loop; -- D in Iterate (Dig_Plan)
    end Dig_Trench;
 
-   procedure Dig_Trench_2 (Trench : out Trenchs.Map;
-                         Dig_Plan : in Dig_Plans.List) is
-
-      Trench_Element : Trench_Elements := (others => False);
-      Coordinate, Previous : Coordinates := (0, 0);
-      Metre : Metres;
-      Direction : Directions;
-
-   begin -- Dig_Trench_2
-      Clear (Trench);
-      Insert (Trench, Coordinate, Trench_Element);
-      for D in Iterate (Dig_Plan) loop
-         case Element (D).Colour and 2#11# is
-            when 0 => Direction := Right;
-            when 1 => Direction := Down;
-            when 2 => Direction := Left;
-            when 3 => Direction := Up;
-            when others => raise Program_Error with
-                 "HELP can't possibly get here";
-         end case; -- Element (D).Colour and 16#000003#
-         Metre := Metres (Shift_Right (Element (D).Colour, 4));
-         Trench (Previous) (Direction) := True;
-         Trench_Element := (others => False);
-         Trench_Element (Direction) := True;
-         for M in Metres range 1 .. Metre loop
-            case Direction is
-               when Up =>
-                  Coordinate.Y := @ - 1;
-               when Down =>
-                  Coordinate.Y := @ + 1;
-               when Left =>
-                  Coordinate.X := @ - 1;
-               when Right =>
-                  Coordinate.X := @ + 1;
-            end case; -- Direction
-            if Coordinate = (0, 0) then
-               Trench (First (Trench)) (Direction) := True;
-            else
-               insert (Trench, Coordinate, Trench_Element);
-            end if; -- Coordinate = (0, 0)
-         end loop; -- M in Metres range 1 .. Meter
-         Previous := Coordinate;
-      end loop; -- D in Iterate (Dig_Plan)
-   end Dig_Trench_2;
-
    function Inside_Count (Trench_Map : in Trenchs.Map) return Natural is
 
       -- To be inside loop, the count of crossings of the loop in a row has to
@@ -247,8 +211,141 @@ procedure December_18 is
       return Count;
    end Inside_Count;
 
+   procedure Dig_Trench_2 (Trench : out Trenchs.Map;
+                           Corner : out Corners.Map;
+                           Dig_Plan : in Dig_Plans.List) is
+
+      Trench_Element : Trench_Elements := (others => False);
+      Coordinate, Previous : Coordinates := (0, 0);
+      Metre : Metres;
+      Direction : Directions;
+
+   begin -- Dig_Trench_2
+      Clear (Trench);
+      Clear (Corner);
+      Insert (Trench, Coordinate, Trench_Element);
+      for D in Iterate (Dig_Plan) loop
+         if not Contains (Corner, Coordinate.Y) then
+            Insert (Corner, Coordinate.Y, Corner_Sets.Empty_Set);
+         end if; -- not Contains (Corner, Coordinate.Y)
+         Insert (Corner (Coordinate.Y), Coordinate);
+         case Element (D).Colour and 2#11# is
+            when 0 => Direction := Right;
+            when 1 => Direction := Down;
+            when 2 => Direction := Left;
+            when 3 => Direction := Up;
+            when others => raise Program_Error with
+                 "HELP can't possibly get here";
+         end case; -- Element (D).Colour and 16#000003#
+         Metre := Metres (Shift_Right (Element (D).Colour, 4));
+         Trench (Previous) (Direction) := True;
+         Trench_Element := (others => False);
+         Trench_Element (Direction) := True;
+         for M in Metres range 1 .. Metre loop
+            case Direction is
+               when Up =>
+                  Coordinate.Y := @ - 1;
+               when Down =>
+                  Coordinate.Y := @ + 1;
+               when Left =>
+                  Coordinate.X := @ - 1;
+               when Right =>
+                  Coordinate.X := @ + 1;
+            end case; -- Direction
+            if Coordinate = (0, 0) then
+               Trench (First (Trench)) (Direction) := True;
+            else
+               insert (Trench, Coordinate, Trench_Element);
+            end if; -- Coordinate = (0, 0)
+         end loop; -- M in Metres range 1 .. Meter
+         Previous := Coordinate;
+      end loop; -- D in Iterate (Dig_Plan)
+   end Dig_Trench_2;
+
+   function Inside_Count (Trench_Map : in Trenchs.Map;
+                          Corner : in Corners.Map) return Long_Natural is
+
+      Count, Row_Count : Long_Natural := 0;
+      X_Low : Ordinates := Ordinates'Last;
+      X_High : Ordinates := Ordinates'First;
+      Y, Previous_Y : Ordinates;
+      Edge_Count : integer;
+      In_Loop : Boolean;
+      Previous_NS : Directions;
+
+   begin -- Inside_Count
+      for C in Iterate (Corner) loop
+         For I in Iterate (Corner (C)) loop
+            if X_Low > Element (I).X then
+               X_Low := Element (I).X;
+            end if; -- X_Low > Element (I)
+            if X_High < Element (I).X then
+               X_High := Element (I).X;
+            end if; -- X_High < Element (I).X
+         end loop; -- I in Iterate (Corner (C))
+      end loop; -- C in Iterate (Corner)
+      Previous_Y := First_Key (Corner) + 1;
+      for C in Iterate (Corner) loop
+         Y := Key (C);
+         if Y /= First_Key (Corner) then
+            Count := @ + Row_Count * Long_Natural (Y - Previous_Y);
+         end if; -- Y /= First_Key (Corner)
+         while Y < Last_Key (Corner) loop
+            -- count current and next rows, except last row, no inside.
+            Edge_Count := 0;
+            Previous_NS := Right; -- has to be anything other than Up or Down
+            In_Loop := False;
+            Row_Count := 0;
+            for X in Ordinates range X_Low .. X_High loop
+               if Contains (Trench_Map, (X, Y)) then
+                  -- Don't count twice for entrances and exits from a row in the
+                  -- same direction
+                  if Trench_Map ((X, Y)) (Up) and
+                    not (Previous_NS = Up and In_Loop) then
+                     Edge_Count := Edge_Count + 1;
+                  elsif Trench_Map ((X, Y)) (Down) and
+                    not (Previous_NS = Down and In_Loop) then
+                     Edge_Count := Edge_Count - 1;
+                  end if; -- Trench ((X, Y)) (Up)
+                  -- Set In_loop False if the row has been exited in the same
+                  -- direction as it was entered
+                  if In_Loop and then
+                    ((Trench_Map ((X, Y)) (Up) and Previous_NS = Up) or
+                       (Trench_Map ((X, Y)) (Down) and Previous_NS = Down)) then
+                     In_Loop := False;
+                     Previous_NS := Right;
+                     -- Anything other than Up or Down but it may not be
+                     -- essential to make it invalid here;
+                  end if; -- In_Loop and then
+                  -- In_Loop becomes true when a bend is in the current row and
+                  -- remains true whilst there is a connection in that row.
+                  In_Loop := (In_loop or Trench_Map ((X, Y)) (Up) or
+                                Trench_Map ((X, Y)) (Down)) and
+                    (Trench_Map ((X, Y)) (Right) or Trench_Map ((X, Y)) (Left));
+                  if Trench_Map ((X, Y)) (Up) then
+                     Previous_NS := Up;
+                  elsif Trench_Map ((X, Y)) (Down) then
+                     Previous_NS := Down;
+                  end if; -- Trench_Map ((X, Y)) (Up)
+               end if; -- Contains (Trench_Map, (X, Y))
+               if Edge_Count mod 2 = 1 and not
+                 Contains (Trench_Map, (X, Y)) then
+                  Row_Count := @ + 1;
+               end if; -- Edge_Count mod 2 = 1 and not  ...
+            end loop; -- X in Ordinates range X_Low .. X_High
+            exit when Y = Key (C) + 1;
+            Y := Y + 1;
+            Count := @ + Row_Count;
+            Row_Count := 0;
+         end loop; -- Y < Last_Key (Corner)
+         Previous_Y := Y;
+      end loop; -- C in Iterate (Corner)
+      return Count;
+   end Inside_Count;
+
    Dig_Plan : Dig_Plans.List;
    Trench : Trenchs.Map;
+   Corner : Corners.Map;
 
 begin -- December_18
    Read_input (Dig_Plan);
@@ -256,8 +353,8 @@ begin -- December_18
    Put_Line ("Part one:" & Positive'Image (Positive (Length (Trench)) +
                Inside_Count (Trench)));
    DJH.Execution_Time.Put_CPU_Time;
-   Dig_Trench_2 (Trench, Dig_Plan);
-   Put_Line ("Part two:" & Positive'Image (Positive (Length (Trench)) +
-               Inside_Count (Trench)));
+   Dig_Trench_2 (Trench, Corner, Dig_Plan);
+   Put_Line ("Part two:" & Long_Natural'Image (Long_Natural (Length (Trench)) +
+               Inside_Count (Trench, Corner)));
    DJH.Execution_Time.Put_CPU_Time;
 end December_18;
