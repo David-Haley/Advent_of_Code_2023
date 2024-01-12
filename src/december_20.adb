@@ -12,6 +12,7 @@ with Ada.Containers.Doubly_Linked_Lists;
 with Ada.Containers.Synchronized_Queue_Interfaces;
 with Ada.Containers.Unbounded_Synchronized_Queues;
 with DJH.Execution_Time; use DJH.Execution_Time;
+with DJH.Gcd_Lcm;
 
 procedure December_20 is
 
@@ -231,6 +232,9 @@ procedure December_20 is
         Ada.Containers.Ordered_Maps (Gate_Names, Count_Lists.List);
       use High_Counts;
 
+      package Long_LCM is new DJH.Gcd_Lcm (Long_Positive);
+      use Long_LCM;
+
       procedure Build (State_Variable_Map : in State_Variable_Maps.Map;
                        Nand_Gate : out Gate_Names;
                        High_Count : out High_Counts.Map) is
@@ -274,7 +278,7 @@ procedure December_20 is
       Nand_Gate : Gate_Names;
       Current_Message : Messages;
       Anded : Pulses;
-      Product : Long_Positive := 1;
+      LCM_Result : Long_Positive := 1;
 
    begin -- Presses_Two
       Build (State_Variable_Map, Nand_Gate, High_Count);
@@ -333,9 +337,10 @@ procedure December_20 is
          end loop; -- Message_Queue.Current_Use > 0
       end loop; -- not All_High (High_Count)
       for H in Iterate (High_Count) loop
-         Product := @ * Long_Positive (First_Element (Element (H)));
+         LCM_Result :=
+           LCM (LCM_Result, Long_Positive (First_Element (Element (H))));
       end loop; -- H in Iterate (High_Count)
-      return Product;
+      return LCM_Result;
    end Presses_Two;
 
    State_Variable_Map : State_Variable_Maps.Map;
