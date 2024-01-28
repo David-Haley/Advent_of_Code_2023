@@ -9,6 +9,8 @@ with Ada.Containers; use Ada.Containers;
 with Ada.Containers.Doubly_Linked_Lists;
 with Ada.Containers.Ordered_Sets;
 with Ada.Containers.Ordered_Maps;
+with Ada.Containers.Synchronized_Queue_Interfaces;
+with Ada.Containers.Unbounded_Synchronized_Queues;
 with Interfaces; use Interfaces;
 with DJH.Execution_Time; use DJH.Execution_Time;
 
@@ -25,7 +27,16 @@ procedure December_25 is
      Ada.Containers.Ordered_Maps (Component_Names, Neighbours.Set);
    use Connection_Maps;
 
-   type Disjoint_Sets is array (Boolean) of Neighbours.Set;
+   type Edges is record
+      Component_1, Component_2 : Component_Names;
+   end record; -- Edges;
+
+   function "<" (Left, Right : Edges) return Boolean is
+     (Left.Component_1 & Left.Component_2 <
+        Right.Component_1 & Right.Component_2);
+
+   package Visited_Sets is new Ada.Containers.Ordered_Sets (Edges);
+   use Visited_Sets;
 
    procedure Read_input (Connection_Map : out Connection_Maps.Map) is
 
@@ -76,113 +87,149 @@ procedure December_25 is
       end loop; -- Cc /= Connection_Maps.No_Element
    end Complete_Map;
 
-   procedure Initial_Split (Connection_Map : in Connection_Maps.Map;
-                            Disjoint_Set : out Disjoint_Sets) is
+   function To_Edge (Left, Right : in Component_Names) return Edges is
 
-      S : Boolean := True;
+   begin -- To_Edge Make_Edge
+      if Left < Right then
+         return (Left, Right);
+      else
+         return (Right, Left);
+      end if; -- Make_Edge
+   end To_Edge;
 
-   begin -- Initial_Split
-      Disjoint_Set := (others => Neighbours.Empty_Set);
-      for C in Iterate (Connection_Map) loop
-         insert (Disjoint_Set (S), Key (C));
-         S := not S;
-      end loop; -- C in Iterate (Connection_Map)
-   end Initial_Split;
+   pragma Inline_Always (To_Edge);
 
-   procedure Split (Connection_Map : in Connection_Maps.Map;
-                    Disjoint_Set : in out Disjoint_Sets) is
+   function Find_Last (Start : in Component_Names;
+                       Connection_Map : in Connection_Maps.Map)
+                       return Component_Names is
 
-      function External_Count (Component : in Component_names;
-                               Connection_Map : in Connection_Maps.Map;
-                               Disjoint_Set : in Disjoint_Sets)
-                               return Natural is
+      package Q_I is new
+        Ada.Containers.Synchronized_Queue_Interfaces (Component_Names);
+      use Q_I;
 
-         Count : Natural := 0;
+      package Queues is new Ada.Containers.Unbounded_Synchronized_Queues (Q_I);
+      use Queues;
 
-      begin -- External_Count
-         if Contains (Disjoint_Set (False), Component) then
-            for N in Iterate (Connection_Map (Component)) loop
-               if Contains (Disjoint_Set (True), Element (N)) then
-                  Count := @ + 1;
-               end if; -- Contains (Disjoint_Set (True), Element (N))
-            end loop; -- N in Iterate (Connection_Map (Component))
+      Visited_Set : Visited_Sets.Set;
+      Queue : Queues.Queue;
+      Current : Component_Names;
+
+   begin -- Find_Last
+      Clear (Visited_Set);
+      Queue.Enqueue (Start);
+      while Queue.Current_Use > 0 loop
+         Queue.Dequeue (Current);
+         for N in Iterate (Connection_Map (Current)) loop
+            if not Contains (Visited_Set, To_Edge (Current, Element (N))) then
+               include (Visited_Set, To_Edge (Current, Element (N)));
+               Queue.Enqueue (Element (N));
+            end if; -- not Contains (Visited_Set, To_Edge (Current, ...
+         end loop; -- N in Iterate (Connection_Map (Current))
+      end loop; -- Queue.Current_Use > 0
+      return Current;
+   end Find_Last;
+
+   procedure Find_First (Start, Destination : in Component_Names;
+                         Visited_Set_In : In Visited_Sets. Set;
+                         Connection_Map : in Connection_Maps.Map;
+                         Found : out Boolean;
+                         Path : out Visited_Sets.Set;
+                         Reachable : out Neighbours.Set) is
+
+      type Search_Elements is record
+         Component_Name : Component_Names;
+         Path : Visited_Sets.Set;
+      end record; -- Search_Elements
+
+      package Q_I is new
+        Ada.Containers.Synchronized_Queue_Interfaces (Search_Elements);
+      use Q_I;
+
+      package Queues is new Ada.Containers.Unbounded_Synchronized_Queues (Q_I);
+      use Queues;
+
+      Visited_Set : Visited_Sets.Set := Copy (Visited_Set_in);
+      Queue : Queues.Queue;
+      Current, Next : Search_Elements := (Start, Visited_Sets.Empty_Set);
+
+   begin -- Find_First
+      Clear (Path);
+      Reachable := To_Set (Start);
+      Found := False;
+      Queue.Enqueue (Current);
+      while not Found and Queue.Current_Use > 0 loop
+         Queue.Dequeue (Current);
+         Found := Current.Component_Name = Destination;
+         if Found then
+            Path := Current.Path;
          else
-            for N in Iterate (Connection_Map (Component)) loop
-               if Contains (Disjoint_Set (False), Element (N)) then
-                  Count := @ + 1;
-               end if; -- Contains (Disjoint_Set (False), Element (N))
-            end loop; -- N in Iterate (Connection_Map (Component))
-         end if; -- Contains (Disjoint_Set (False), Component)
-         return Count;
-      end External_Count;
-
-      function Connections (Connection_Map : in Connection_Maps.Map;
-                            Disjoint_Set : in Disjoint_Sets)
-                            return Neighbours.set is
-
-         Result : Neighbours.Set := Neighbours.Empty_Set;
-
-      begin -- Connections
-            for M in Iterate (Disjoint_Set (False)) loop
-               for N in Iterate (Connection_Map (Element (M))) loop
-                  If Contains (Disjoint_Set (True), Element (N)) then
-                     Include (Result, Element (N));
-                  end if; -- Contains (Disjoint_Set (not S), Element (N))
-               end loop; -- N in Iterate (Connection_Map (Element (M)))
-            end loop; -- Iterate (Disjoint_Set (False))
-         return Result;
-      end Connections;
-
-      Nc : Neighbours.Cursor;
-      Max_Count : Natural;
-
-   begin -- Split
-      while Length (Connections (Connection_Map, Disjoint_Set)) /= 3 loop
-         for S in Boolean loop
-            Max_Count := 3;
-            for N in Iterate (Disjoint_Set (S)) loop
-               if Max_Count < External_Count (Element (N), Connection_Map,
-                                              Disjoint_Set) then
-                  Max_Count := External_Count (Element (N), Connection_Map,
-                                               Disjoint_Set);
-               end if; -- Max_Count < External_Count (Element (N) ...
-            end loop; -- N in Iterate (Disjoint_Set (S)) loop
-            Nc := First (Disjoint_Set (S));
-            while Nc /= Neighbours.No_Element loop
-               if External_Count (Element (Nc), Connection_Map, Disjoint_Set) =
-                 Max_Count then
-                  Put (Element (Nc) & " ");
-                  insert (Disjoint_Set (not S), Element (Nc));
-                  Delete (Disjoint_Set (S), Nc);
-                  Nc := First (Disjoint_Set (S));
-               else
-                  Next (Nc);
-               end if; -- External_Count (Element (Nc), Connection_Map ...
-            end loop; -- Nc /= Neighbours.No_Element
-            if S then
-               Put_Line ("<");
-            else
-               Put_Line (">");
-            end if; -- S
-            Put_Line ("Connections: " & Connections (Connection_Map, Disjoint_Set)'Img);
-            Put_Line (Length (Disjoint_Set (False))'Img & Length (Disjoint_Set (True))'Img);
-         end loop; -- S in Boolean
-      end loop; -- Length (Connections (Connection_Map, Disjoint_Set)) /= 3
-   end Split;
+            for N in Iterate (Connection_Map (Current.Component_Name)) loop
+               if not Contains (Visited_Set,
+                                To_Edge (Current.Component_Name,
+                                  Element (N))) then
+                  Include (Reachable, (Element (N)));
+                  Include (Visited_Set,
+                           To_Edge (Current.Component_Name, Element (N)));
+                  Next := (Element (N), Copy (Current.Path));
+                  Include (Next.Path,
+                           To_Edge (Current.Component_Name, Element (N)));
+                  Queue.Enqueue (Next);
+               end if; -- not Contains (Visited_Set, To_Edge (Current, ...
+            end loop; -- N in Iterate (Connection_Map (Current.Component_Name))
+         end if; -- Found
+      end loop; -- not Found and Queue.Current_Use > 0
+   end Find_First;
 
    Connection_Map : Connection_Maps.Map;
-   Disjoint_Set : Disjoint_Sets;
+   Left, Right : Component_Names;
+   Path, Visited : Visited_Sets.Set;
+   Reachable : Neighbours.Set;
+   Found : Boolean;
 
 begin -- December_25
    Read_input (Connection_Map);
    Complete_Map (Connection_Map);
-   for C in Iterate (Connection_Map) loop
-      Put_Line (Key (C) & Length (Element (C))'Img);
-   end loop;
-   Initial_Split (Connection_Map, Disjoint_Set);
-   Split (Connection_Map, Disjoint_Set);
-   Put_Line (Disjoint_Set'Img);
-   Put_Line ("Part one:" & Count_Type'Image (Length (Disjoint_Set (False)) *
-               Length (Disjoint_Set(True))));
+   Left := Find_Last (First_Key (Connection_Map), Connection_Map);
+   --  Left := Find_Last ("pzl", Connection_Map);
+   Right := Find_Last (left, Connection_Map);
+   Put_Line (First_Key (Connection_Map) & " " & Left & " " & Right);
+   -- Left and Right are most distant from each other and in the two distinct
+   -- groups.
+   Clear (Visited);
+   Find_First (Left, Right, Visited, Connection_Map, Found, Path, Reachable);
+   if Found then
+      Union (Visited, Path);
+   else
+      Put_Line (Reachable'Img);
+      raise Program_Error with Right & " not found path 1";
+   end if; -- Found
+   Find_First (Left, Right, Visited, Connection_Map, Found, Path, Reachable);
+   if Found then
+      Union (Visited, Path);
+   else
+      Put_Line (Reachable'Img);
+      raise Program_Error with Right & " not found path 2";
+   end if; -- Found
+   Find_First (Left, Right, Visited, Connection_Map, Found, Path, Reachable);
+   if Found then
+      Union (Visited, Path);
+   else
+      Put_Line (Reachable'Img);
+      raise Program_Error with Right & " not found path 3";
+   end if; -- Found
+   Find_First (Left, Right, Visited, Connection_Map, Found, Path, Reachable);
+   if Found then
+      raise Program_Error with Right & " only three paths expected";
+   end if; -- Found
+   Put_Line (Reachable'Img);
+   Put_Line ("Part one:" & Count_Type'Image (Length (Reachable) *
+             (Length (Connection_Map) - Length (Reachable))));
    DJH.Execution_Time.Put_CPU_Time;
+   --  Find_First (Right, Left, Visited, Connection_Map, Found, Path, Reachable);
+   --  if Found then
+   --     raise Program_Error with Right & " only three paths expected";
+   --  end if; -- Found
+   --  Put_Line (Reachable'Img);
+   --  Reachable := Connection_Map ("pzl");
+   --  Put_Line (Reachable'Img);
 end December_25;
