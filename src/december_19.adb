@@ -1,6 +1,7 @@
 with Ada.Text_IO; use Ada.Text_IO;
 with Ada.Command_Line; use Ada.Command_Line;
 with Ada.Text_IO.Unbounded_IO; use Ada.Text_IO.Unbounded_IO;
+with Ada.Characters.Handling; use Ada.Characters.Handling;
 with Ada.Strings; use Ada.Strings;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Ada.Strings.Maps; use Ada.Strings.Maps;
@@ -14,8 +15,19 @@ procedure December_19 is
 
    type Properties is (X, M, A, S);
 
-   subtype Values is Positive range 1 .. 4000;
+   subtype Values is Long_Long_Integer range 1 .. 4000;
    -- Upper bound Known after part 1 complete
+
+   type Bounds is record
+      Lower : Values := Values'First;
+      Upper : Values := Values'Last;
+   end record; -- Bounds;
+
+   type Bound_Arrays is array (Properties) of Bounds;
+
+   package Bound_Stores is new
+     Ada.Containers.Doubly_Linked_Lists (Bound_Arrays);
+   use Bound_Stores;
 
    type Parts is array (Properties) of Values;
 
@@ -114,11 +126,11 @@ procedure December_19 is
          end case; -- Operator
       end One_Test;
 
-      Action_Delimiters : constant Character_Set := To_Set (":,");
       Test_Result : Boolean;
       Start_At, First : Positive;
       Last : Natural;
       True_Action, False_Action : Actions;
+      Action_Delimiters : constant Character_Set := To_Set (":,");
 
    begin -- Is_Accepted
       Test_Result := One_Test (Action, Part, Start_At);
@@ -129,7 +141,7 @@ procedure December_19 is
       if Test_Result then
          if Element (True_Action, 1) = 'A' then
             return True;
-         elsif  Element (True_Action, 1) = 'R' then
+         elsif Element (True_Action, 1) = 'R' then
             return False;
          else
             return
@@ -149,16 +161,136 @@ procedure December_19 is
       end if; -- Test_Result
    end Is_Accepted;
 
+   procedure Find_Bounds (Workflow_Store : in Workflow_Stores.Map;
+                          Flow_Name : in Flow_Names;
+                          Bound_Array_In : in Bound_Arrays;
+                          Bound_Store : in out Bound_Stores.List) is
+
+      function Get_Value (Action : in Actions;
+                          Start_At : in out Positive) return Values is
+
+         -- Has side effect of setting Start_At to character after ':'
+
+         First : Positive;
+         Last : Natural;
+
+      begin -- Get_Value
+         Find_Token (Action, Decimal_Digit_Set, Start_AT, Inside, First, Last);
+         Start_At := Last + 2;
+         if Length (Action) < Last + 1 or else
+           Element (Action, Last + 1 ) /= ':' then
+            raise Program_Error with "Test action not found";
+         end if; -- Length (Action) < Last + 1 or else ...
+         return Values'Value (Slice (Action, First, Last));
+      end Get_Value;
+
+      Start_At : Positive := 1;
+      First : Positive;
+      Last : Natural;
+      Comma_Set : constant Character_Set := To_Set (",");
+      True_Bound : Bound_Arrays;
+      False_Bound : Bound_Arrays := Bound_Array_In;
+      Action : Actions := Workflow_Store (Flow_Name);
+      Property : Properties;
+      Operator : Operators;
+      Value : Values;
+
+   begin -- Find_Bounds
+      loop -- Process one workflow element
+         Find_Token (Action, Comma_Set, Start_At, Outside, First, Last);
+         Start_At := Last + 1;
+         if Element (Action, First) = 'A' then
+            Append (Bound_Store, False_Bound);
+         elsif  Element (Action, First)  = 'R' then
+            Null;
+         elsif First + 1 < Last and then
+           Element (Action, First + 1) in Operators then
+            True_Bound := False_Bound;
+            Property := Properties'Value (Slice (Action, First, First));
+            First := First + 1;
+            Operator := Element (Action, First);
+            First := First + 1;
+            Value := Get_Value (Action, First);
+            case Operator is
+               when '>' =>
+                  if True_Bound (Property).Lower <= Value then
+                     True_Bound (Property).Lower := Value + 1;
+                  end if; -- True_Bound (Property).Lower <= Value
+                  if False_Bound (Property).Upper > Value then
+                     False_Bound (Property).Upper := Value;
+                  end if; -- False_Bound (Property).Upper > Value
+               when '<' =>
+                  if True_Bound (Property).Upper >= Value then
+                     True_Bound (Property).Upper := Value - 1;
+                  end if; -- True_Bound (Property).Upper >= Value
+                  if False_Bound (Property).Lower < Value then
+                     False_Bound (Property).Lower := Value;
+                  end if; -- False_Bound (Property).Lower < Value
+            end case; -- Operator
+            if Element (Action, First) = 'A' then
+               Append (Bound_Store, True_Bound);
+            elsif Element (Action, First) = 'R' then
+               Null;
+            else
+               Find_Bounds (Workflow_Store,
+                            Unbounded_Slice (Action, First, Last),
+                            True_Bound,
+                            Bound_Store);
+            end if; -- Element (Action, Start_A) = 'A'
+         else
+            Find_Bounds (Workflow_Store,
+                         Unbounded_Slice (Action, First, Last),
+                         False_Bound,
+                         Bound_Store);
+         end if; -- Element (Action, First) = 'A'
+         exit when Start_At >= Length (Action);
+      end loop; -- Process one workflow element
+   end Find_Bounds;
+
+   function Sum_Bounds (Bound_Store : in Bound_Stores.List)
+                        return Long_Long_Integer is
+
+      function Get_Bound (Bound_Store : in Bound_Stores.List;
+                          B : in Bound_Stores.Cursor;
+                          P : In Properties)
+                          return Long_Long_Integer is
+
+      begin -- Get_Bound
+         if Element (B) (P).Lower < Element (B) (P).Upper then
+            return Element (B) (P).Upper - Element (B) (P).Lower + 1;
+            -- Got to watch that + 1, a range of 2 to 3 has two elements!
+         else
+            return 0;
+         end if; -- Element (B) (P).Lower < Element (B) (P).Upper
+      end Get_Bound;
+
+      Sum : Long_Long_Integer := 0;
+      Product : Long_Long_Integer;
+
+   begin -- Sum_Bounds
+      for B in Iterate (Bound_Store) loop
+         Product := 1;
+         for P in Properties loop
+            Product := @ * Get_Bound (Bound_Store, B, P);
+         end loop; -- P in Properties
+         Sum := @ + Product;
+      end loop; -- B in Iterate (Bound_Store)
+      return Sum;
+   end Sum_Bounds;
+
    Workflow_Store : Workflow_Stores.Map;
    Part_Store : Part_Stores.List;
-   Sum : Natural;
+   Sum : Long_Long_Integer;
+   Starting_Bounds : Bound_Arrays; -- initialised by record declaration
+   Bound_Store : Bound_Stores.List := Bound_Stores.Empty_List;
+   Workflow_Start : constant Unbounded_String := To_Unbounded_String ("in");
 
 begin -- December_19
    Read_input (Workflow_Store, Part_Store);
    Sum := 0;
    for Part in Iterate (Part_Store) loop
       if Is_Accepted (Workflow_Store, Element (Part),
-                      Workflow_Store (To_Unbounded_String ("in"))) then
+                      Workflow_Store (Workflow_Start)) then
          for Prperty in Properties loop
             Sum := @ + Element (Part) (Prperty);
          end loop; -- Prperty in Properties
@@ -166,6 +298,7 @@ begin -- December_19
    end loop; -- P in Iterate (Part_Store)
    Put_Line ("Part one:" & Sum'Img);
    DJH.Execution_Time.Put_CPU_Time;
-   Put_Line ("Part two:");
+   Find_Bounds (Workflow_Store, Workflow_Start, Starting_Bounds, Bound_Store);
+   Put_Line ("Part two:" & Sum_Bounds (Bound_Store)'Img);
    DJH.Execution_Time.Put_CPU_Time;
 end December_19;
