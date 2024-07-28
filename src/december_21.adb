@@ -12,9 +12,7 @@ with DJH.Execution_Time; use DJH.Execution_Time;
 
 procedure December_21 is
 
-   subtype Ordinates is Natural;
-   -- Actual coordinates start at 1 avoids additional testing when taking a
-   -- step in a negative direction.
+   subtype Ordinates is Integer;
 
    type Coordinates is record
       X, Y : Ordinates;
@@ -32,6 +30,8 @@ procedure December_21 is
    procedure Read_Input (Garden : out Gardens.Map;
                          Start : out Coordinates) is
 
+      -- Map is assumed to be square to return a valid Map_Size
+
       Input_File : File_Type;
       Text : Unbounded_String;
       Y : Ordinates;
@@ -40,7 +40,7 @@ procedure December_21 is
       if Argument_Count = 0 then
          Open (Input_File, In_File, "december_21.txt");
       else
-         Open (Input_File, In_File, Argument(1));
+         Open (Input_File, In_File, Argument (1));
       end if; -- Argument_Count = 0
       Clear (Garden);
       while not End_Of_File (Input_File) loop
@@ -63,10 +63,10 @@ procedure December_21 is
                            Start : in Coordinates;
                            Max_Steps : in Positive) return Count_Type is
 
-      subtype Steps is Natural range 0 .. Max_Steps;
+      -- This has the side effect of setting true all the elements that can be
+      -- visited in Max_Steps.
 
-      package Plot_Stores is new Ada.Containers.Ordered_Sets (Coordinates);
-      use Plot_Stores;
+      subtype Steps is Natural range 0 .. Max_Steps;
 
       type Search_Elements is record
          Coordinate : Coordinates;
@@ -91,10 +91,8 @@ procedure December_21 is
                          Garden : in Gardens.Map)
                          return Boolean is
            (Contains (Garden, Search_Element.Coordinate)
-            and then not (Garden (Search_Element.Coordinate) and
-                Search_Element.Step mod 2 = Steps'Last mod 2));
-         -- Is a garden plot and hasn't previously been reached with the
-         -- even count.
+            and then not Garden (Search_Element.Coordinate));
+         -- Is a garden plot and hasn't previously been reached.
 
          pragma Inline_Always (Valid);
 
@@ -121,40 +119,92 @@ procedure December_21 is
       end  Conditional_Enqueue;
 
       Current_SE : Search_Elements := (Start, 0);
-      Plot_Store : Plot_Stores.Set := Plot_Stores.Empty_Set;
+      Visited : Count_Type := 0;
 
    begin -- Visited_Plots
       Queue.Enqueue (Current_SE);
       While Queue.Current_Use > 0 loop
          Queue.Dequeue (Current_SE);
-         if Current_SE.Step = Steps'Last then
-            include (Plot_Store, Current_SE.Coordinate);
-         else
+         if Current_SE.Step < Steps'Last then
             Conditional_Enqueue (Current_SE, North, Garden);
             Conditional_Enqueue (Current_SE, East, Garden);
             Conditional_Enqueue (Current_SE, South, Garden);
             Conditional_Enqueue (Current_SE, West, Garden);
-         end if; -- Current_SE.Step = Steps'Last
+         end if; -- Current_SE.Step < Steps'Last
       end loop; -- Queue.Current_Use > 0
-      for G in Iterate (Garden) loop
+      for G in iterate (Garden) loop
          if Garden (G) then
-            include (Plot_Store, Key (G));
+            Visited := @ + 1;
          end if; -- Garden (G)
-      end loop; -- G in Iterate Garden)
-      return Length (Plot_Store);
+      end loop; -- G in iterate (Garden)
+      return Visited;
    end Visited_Plots;
 
-   Max_Steps : Positive := 64;
+   function Extrapolate (Garden : in Gardens.Map;
+                         Start : in Coordinates) return long_Long_Integer is
+
+      -- Calculation is based on the assumption that the number of plots
+      -- visited is of the form Y(n) := A n ** 2 + B * n + C where n is the
+      -- multiplier of the map size. This is not valid for the example!
+
+      procedure Big_Map (Garden : in Gardens.Map;
+                         N : in Positive;
+                         Map_Size : in Ordinates;
+                         Big_Garden : out Gardens.Map) is
+
+      begin -- Big_Map
+         clear (Big_Garden);
+         for G in iterate (Garden) loop
+            for X in Integer range -N .. N loop
+               for Y in Integer range -N .. N loop
+                  Insert (Big_Garden,
+                          (Key (G).X + X * Map_Size,
+                           Key (G).Y + Y * Map_Size),
+                          False);
+               end loop; -- Y in Integer range -N .. N
+            end loop; -- X in Integer range -N .. N
+         end loop; -- G in iterate (Garden)
+      end Big_Map;
+
+      Max_Steps_Part_2 : constant Positive := 26501365;
+      Map_Size : constant Ordinates := 131;
+      Initial_Steps : constant Positive := 65;
+      Step_Multiplier : constant Long_Long_Integer :=
+        Long_Long_Integer ((Max_Steps_Part_2 - Initial_Steps) / Map_Size);
+      Big_Garden : Gardens.Map;
+      A, B, C, Y1, Y2 : Long_Long_Integer;
+
+   begin -- Extrapolate
+      Big_Garden := Garden;
+      -- Big_Garden is just a copy of Garden for n = 0.
+      C := Long_Long_Integer (Visited_Plots (Big_Garden, Start, Initial_Steps));
+      Big_Map (Garden, 1, Map_Size, Big_Garden);
+      Y1 := Long_Long_Integer (Visited_Plots (Big_Garden, Start,
+                               Map_Size + Initial_Steps));
+      Big_Map (Garden, 2, Map_Size, Big_Garden);
+      Y2 := Long_Long_Integer (Visited_Plots (Big_Garden, Start,
+                               2 * Map_Size + Initial_Steps));
+      B := (-Y2 + 4 * Y1 - 3 * C) / 2;
+      A := Y1 -B -C;
+      return A * Step_Multiplier ** 2 + B * Step_Multiplier + C;
+   end Extrapolate;
+
+   Max_Steps_Part_1 : Positive := 64;
    Garden : Gardens.Map;
    Start : Coordinates;
 
 begin -- December_21
    if Argument_Count = 2 then
-      Max_Steps := Positive'Value (Argument (2));
-   end if; -- Argument_Count = 2
+      Max_Steps_Part_1 := Positive'Value (Argument (2));
+   end if; -- Argument_Count = 2 or Argument_Count = 3
    Read_input (Garden, Start);
-   Put_Line ("Part one:" & Visited_Plots (Garden, Start, Max_Steps)'Img);
+   Put_Line ("Part one:" & Visited_Plots (Garden, Start, Max_Steps_Part_1)'Img);
    DJH.Execution_Time.Put_CPU_Time;
-   Put_Line ("Part two:");
-   DJH.Execution_Time.Put_CPU_Time;
+   Read_Input (Garden, Start);
+   if Argument_Count < 2 then
+      Put_Line ("Part two:" & Extrapolate (Garden, Start)'Img);
+      DJH.Execution_Time.Put_CPU_Time;
+   else
+      Put_Line ("Part 2 solution only valid for specially constructed garden!");
+   end if; -- Argument_Count < 2
 end December_21;
