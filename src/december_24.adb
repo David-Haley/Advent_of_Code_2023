@@ -27,9 +27,10 @@ procedure December_24 is
    end record; -- Hail_Stones
 
    type Planes is record
-      V : Vector_3; -- intersection with axies
-      O : Ordinates; -- offset from origin
+      V : Vector_3;
+      O : Ordinates;
    end record; -- Planes
+   -- Plain represenred by O = x * V.X + y * V.Y + z * V.Z
 
    package Hail_Stone_Lists is new
      Ada.Containers.Doubly_Linked_Lists (Hail_Stones);
