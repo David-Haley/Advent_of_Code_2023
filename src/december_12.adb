@@ -8,12 +8,9 @@ with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Ada.Containers; use Ada.Containers;
 with Ada.Containers.Doubly_Linked_Lists;
 with Ada.Containers.Ordered_Maps;
-with Interfaces; use Interfaces;
 with DJH.Execution_Time; use DJH.Execution_Time;
 
 procedure December_12 is
-
-   type Spring_States is (Operational, Damaged, Unknown);
 
    package Run_Lists is new Ada.Containers.Doubly_Linked_Lists (Positive);
    use Run_Lists;
@@ -29,10 +26,7 @@ procedure December_12 is
      Ada.Containers.Doubly_Linked_Lists (Condition_Reports);
    use Report_Stores;
 
-   subtype Bits is Natural range 0 .. 31;
-   -- allows for upto 32 unknown springs;
-   package Perm_Maps is new Ada.Containers.Ordered_Maps (Bits, Positive);
-   use Perm_Maps;
+   subtype Wells is Character with Static_Predicate => Wells in '.' | '#' | '?';
 
    procedure Read_input (Report_Store : out Report_Stores.list) is
 
@@ -69,68 +63,149 @@ procedure December_12 is
       Close (Input_File);
    end Read_input;
 
-   function Count_Permutations (Condition_Report : in Condition_Reports)
+   function Count_Combinations (Rc : in Condition_Reports.Cursor)
                                 return Natural is
 
-      Count : Natural := 0;
-      subtype Map_Indices is Positive range
-        1 .. Length (Condition_Report.Condition_Map);
-      type Maps is array (Map_Indices) of Spring_States;
-      Map : Maps;
-      Perm_Map : Perm_Maps.Map := Perm_Maps.Empty_Map;
-      Unknown_Count : Bits := 0;
-      Trial_List : Run_Lists.List;
-      Bit_Mask : constant Unsigned_32 := 1;
-      Run_Count : Natural := 0;
+      function Search (Rc : in Condition_Reports.Cursor;
+                       Run_C : in Run_Lists.Cursor;
+                       Map_Index : in Positive;
+                       Well : in Well;
+                       Run : in Natural) return Natural is
 
-   begin -- Count_Permutations
-      for M in Map_Indices loop
-         case Element (Condition_Report.Condition_Map, M) is
+         -- Search space is constrained to match run list thus reducing the from
+         -- 2 ** N where N is the number of wells of unknown state.
+
+         Valid_Count : Natural := 0;
+
+      begin -- Search
+         if Map_Index = Length (Element (Rc).Condition_Map) then
+            case Element (Rc).Condition_Map (Map_Index) is
             when '.' =>
-               Map (M) := Operational;
+               if Well = '.' and -- should always be true
+                 ((Run_C = No_Element and then Run = 0) or else
+                      (Element (Rc).Run_List (Run_C) = Run and
+                             Run_C = Last (Element (Rc).Run_List))) then
+                  Valid_Count := @ + 1;
+               end if; -- Well = '.' and ...
             when '#' =>
-               Map (M) := Damaged;
+               if Well = '#' and -- should always be true
+                 (Run_C = Last (Element (Rc).Run_List) and then
+                  Element (Rc).Run_List (Run_C) = Run + 1) then
+                  Valid_Count := @ + 1;
+               end if; -- Well = '#' and ...
             when '?' =>
-               Map (M) := Unknown;
-               Include (Perm_Map, Unknown_Count, M);
-               -- store the position of the unknown springs
-               Unknown_Count := @ + 1;
+               if Well = '.' and
+                 (Run_C = No_Element or else
+                    (Element (Rc).Run_List (Run_C) = Run and
+                         Run_C = Last (Element (Rc).Run_List))) then
+                  Valid_Count := @ + 1;
+               elsif Well = '#' and
+                 (Run_C = Last (Element (Rc).Run_List) and then
+                  Element (Rc).Run_List (Run_C) = Run + 1) then
+                  Valid_Count := @ + 1;
+               else
+                  raise Program_Error with "End search, bad well state '" &
+                    Well & "'";
+               end if; -- Well = '.'
             when others =>
-               raise Program_Error with "Unexpected character '" &
-                 Element (Condition_Report.Condition_Map, M) & "'";
-         end case; -- Element (Condition_Report.Condition_Map, M)
-      end loop; -- M in Map_Indices
-      for Perm in Unsigned_32 range 1 .. 2 ** Unknown_Count loop
-         for M in Iterate (Perm_Map) loop
-            if (Perm and Shift_Left (Bit_Mask, Key (M))) = 0 then
-               Map (Element (M)) := Operational;
-            else
-               Map (Element (M)) := Damaged;
-            end if; -- (Perm and Shift_Left (Bit_Mask, Key (M))) = 0
-         end loop; --  M in Iterate (Perm_Map);
-         Clear (Trial_List);
-         Run_Count := 0;
-         for M in Map_Indices loop
-            if Map (M) = Damaged then
-               Run_Count := @ + 1;
-               if M = Map_Indices'Last then
-                  Append (Trial_List, Run_Count);
-               end if; --Append (Trial_List, Run_Count);
-            elsif  Map (M) = Operational then
-               if Run_Count > 0 then
-                  Append (Trial_List, Run_Count);
-                  Run_Count := 0;
-               end if; -- Run_Count > 0
-            else
-               raise Program_Error with "invalid map state, index:" & M'Img;
-            end if; -- Map (M) = Unknown
-         end loop; -- M in Map_Indices
-         if Trial_List = Condition_Report.Run_List then
-            Count := @ + 1;
-         end if; -- Trial_List
-      end loop; -- Perm in Unsigned_32 range 0 .. 2 ** Unknown_Count
-      return Count;
-   end Count_Permutations;
+               raise Program_Error with "Bad well type in map, last element " &
+                 Element (Element (Rc).Condition_Map,
+                          Length(Element (Rc).Condition_Map));
+            end case; -- Element (Rc).Condition_Map (Map_Index)
+            return Valid_Count;
+         elsif Map_Index < Length (Element (Rc).Condition_Map) then
+            case Element (Rc).Condition_Map (Map_Index) is
+            when '.' =>
+               if Well = '.' and -- should always be true
+                 ((Run_C = No_Element and then Run = 0) or else
+                 Element (Rc).Run_List (Run_C) = Run) then
+                  case Element (Rc).Condition_Map (Map_Index + 1) is
+                  when '.' =>
+                     Search (Rc, Run_C; Map_Index + 1, '.', 0);
+                  when '#' =>
+                     Valid_Count := @ +
+                       Search (Rc, Next (Run_C), Map_Index + 1, '#', 0);
+                  when '?' =>
+                     Valid_Count := @ +
+                       Search (Rc, Run_C, Map_Index + 1, '.', 0) +
+                         Search (Rc, Next (Run_C), Map_Index + 1, '#', 1);
+                  end case; -- Element (Rc).Condition_Map (Map_Index + 1)
+               end if; -- Well = '.' and ..
+            when '#' =>
+               if Well = '#' and -- should always be true
+                 (Run_C /= No_Element and then
+                  Element (Rc).Run_List (Run_C) >= Run + 1) then
+                  case Element (Rc).Condition_Map (Map_Index + 1) is
+                  when '.' =>
+                     Valid_Count := @ +
+                       Search (Rc, Next (Run_C); Map_Index + 1, '.', Run);
+                  when '#' =>
+                     Valid_Count := @ +
+                       Search (Rc, Next (Run_C); Map_Index + 1, '#', Run + 1);
+                  when '?' =>
+                     Valid_Count := @ +
+                       Search (Rc, Next (Run_C); Map_Index + 1, '.', Run) +
+                         Search (Rc, Next (Run_C); Map_Index + 1, '#', Run + 1);
+                  end case; -- Element (Rc).Condition_Map (Map_Index + 1)
+               end if; -- Well = '#' and ...
+            when '?' =>
+               if Well = '.' then
+                  if (Run_C = No_Element and then Run = 0) or else
+                    Element (Rc).Run_List (Run_C) = Run) then
+                     case Element (Rc).Condition_Map (Map_Index + 1) is
+                     when '.' =>
+                        Valid_Count := @ +
+                          Search (Rc, Next (Run_C); Map_Index + 1, '.', 0);
+                     when '#' =>
+                        Valid_Count := @ +
+                          Search (Rc, Next (Run_C); Map_Index + 1, '#', 0);
+                     when '?' =>
+                        Valid_Count := @ +
+                          Search (Rc, Next (Run_C); Map_Index + 1, '.', 0) +
+                            Search (Rc, Next (Run_C); Map_Index + 1, '#', 0);
+                     end case; -- Element (Rc).Condition_Map (Map_Index + 1)
+                  end if; -- (Run_C = No_Element and then Run = 0) or else
+               elsif Well = '#' then
+                  if (Run_C /= No_Element and then
+                      Element (Rc).Run_List (Run_C) >= Run + 1) then
+                     case Element (Rc).Condition_Map (Map_Index + 1) is
+                        when '.' =>
+                           Valid_Count := @ +
+                             Search (Rc, Next (Run_C); Map_Index + 1, '.', Run);
+                        when '#' =>
+                           Valid_Count := @ +
+                             Search (Rc, Next (Run_C); Map_Index + 1, '#',
+                                     Run + 1);
+                        when '?' =>
+                           Valid_Count := @ +
+                             Search (Rc, Next (Run_C); Map_Index + 1, '.', Run)
+                               + Search (Rc, Next (Run_C); Map_Index + 1, '#',
+                                         Run + 1);
+                     end case; -- Element (Rc).Condition_Map (Map_Index + 1)
+                  end if; -- (Run_C /= No_Element and then
+               else
+                  raise Program_Error with "Bad Well " & Well;
+               end if; -- Well = '#'
+            when others =>
+               raise Program_Error with "Bad well type in map " &
+                 Element (Element (Rc).Condition_Map,
+                          Length(Element (Rc).Condition_Map)) &
+                 " at index:" & Map_Index'Img;
+            end case; -- Element (Rc).Condition_Map (Map_Index)
+            end case; -- Element (Rc).Condition_Map (Map_Index)
+         else
+            raise Program_Error with "Search beyond end of map, Map_Index:" &
+              Map_Index'Img
+         end if; -- Map_Index = Length (Element (Rc).Condition_Map)
+      end Search;
+
+   begin -- Count_Combinations
+      return Search (Rc,
+                     First (Element(Rc).Run_List), -- First element of Run_List
+                     1, -- First element of Condition_Map
+                     Element (Element(Rc).Condition_Map, 1), -- First Well
+                     0) -- Initial run length
+   end Count_Combinations;
 
    Report_Store : Report_Stores.List;
    Sum : Natural := 0;
@@ -138,7 +213,7 @@ procedure December_12 is
 begin -- December_12
    Read_input (Report_Store);
    for R in Iterate (Report_Store) loop
-      Sum := @ + Count_Permutations (Element (R));
+      Sum := @ + Count_Combinations (R);
    end loop; -- R in Iterate (Report_Store)
    Put_Line ("Part one:" & Sum'Img);
    DJH.Execution_Time.Put_CPU_Time;
