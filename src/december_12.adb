@@ -63,13 +63,13 @@ procedure December_12 is
       Close (Input_File);
    end Read_input;
 
-   function Count_Combinations (Rc : in Condition_Reports.Cursor)
+   function Count_Combinations (Rc : in Report_Stores.Cursor)
                                 return Natural is
 
-      function Search (Rc : in Condition_Reports.Cursor;
+      function Search (Rc : in Report_Stores.Cursor;
                        Run_C : in Run_Lists.Cursor;
                        Map_Index : in Positive;
-                       Well : in Well;
+                       Well : in Wells;
                        Run : in Natural) return Natural is
 
          -- Search space is constrained to match run list thus reducing the from
@@ -79,10 +79,10 @@ procedure December_12 is
 
       begin -- Search
          if Map_Index = Length (Element (Rc).Condition_Map) then
-            case Element (Rc).Condition_Map (Map_Index) is
+            case Element (Element (Rc).Condition_Map, Map_Index) is
             when '.' =>
                if Well = '.' and -- should always be true
-                 ((Run_C = No_Element and then Run = 0) or else
+                 ((Run_C = Run_lists.No_Element and then Run = 0) or else
                       (Element (Rc).Run_List (Run_C) = Run and
                              Run_C = Last (Element (Rc).Run_List))) then
                   Valid_Count := @ + 1;
@@ -95,7 +95,7 @@ procedure December_12 is
                end if; -- Well = '#' and ...
             when '?' =>
                if Well = '.' and
-                 (Run_C = No_Element or else
+                 (Run_C = Run_Lists.No_Element or else
                     (Element (Rc).Run_List (Run_C) = Run and
                          Run_C = Last (Element (Rc).Run_List))) then
                   Valid_Count := @ + 1;
@@ -111,78 +111,86 @@ procedure December_12 is
                raise Program_Error with "Bad well type in map, last element " &
                  Element (Element (Rc).Condition_Map,
                           Length(Element (Rc).Condition_Map));
-            end case; -- Element (Rc).Condition_Map (Map_Index)
-            return Valid_Count;
+            end case; -- Element (Element (Rc).Condition_Map, Map_Index)
          elsif Map_Index < Length (Element (Rc).Condition_Map) then
-            case Element (Rc).Condition_Map (Map_Index) is
+            case Element (Element (Rc).Condition_Map, Map_Index) is
             when '.' =>
                if Well = '.' and -- should always be true
-                 ((Run_C = No_Element and then Run = 0) or else
-                 Element (Rc).Run_List (Run_C) = Run) then
-                  case Element (Rc).Condition_Map (Map_Index + 1) is
+                 ((Run_C = Run_Lists.No_Element and then Run = 0) or else
+                  Element (Rc).Run_List (Run_C) = Run) then
+                  case Element (Element (Rc).Condition_Map, Map_Index + 1) is
                   when '.' =>
-                     Search (Rc, Run_C; Map_Index + 1, '.', 0);
+                     Valid_Count := @ +
+                       Search (Rc, Run_C, Map_Index + 1, '.', 0);
                   when '#' =>
                      Valid_Count := @ +
                        Search (Rc, Next (Run_C), Map_Index + 1, '#', 0);
                   when '?' =>
                      Valid_Count := @ +
                        Search (Rc, Run_C, Map_Index + 1, '.', 0) +
-                         Search (Rc, Next (Run_C), Map_Index + 1, '#', 1);
-                  end case; -- Element (Rc).Condition_Map (Map_Index + 1)
+                       Search (Rc, Next (Run_C), Map_Index + 1, '#', 1);
+                  when others =>
+                     raise Program_Error with "Bad well state after '.'";
+                  end case; -- Element (Element (Rc).Condition_Map, Map_Index + 1)
                end if; -- Well = '.' and ..
             when '#' =>
                if Well = '#' and -- should always be true
-                 (Run_C /= No_Element and then
+                 (Run_C /= Run_Lists.No_Element and then
                   Element (Rc).Run_List (Run_C) >= Run + 1) then
-                  case Element (Rc).Condition_Map (Map_Index + 1) is
+                  case Element (Element (Rc).Condition_Map, Map_Index + 1) is
                   when '.' =>
                      Valid_Count := @ +
-                       Search (Rc, Next (Run_C); Map_Index + 1, '.', Run);
+                       Search (Rc, Next (Run_C), Map_Index + 1, '.', Run);
                   when '#' =>
                      Valid_Count := @ +
-                       Search (Rc, Next (Run_C); Map_Index + 1, '#', Run + 1);
+                       Search (Rc, Next (Run_C), Map_Index + 1, '#', Run + 1);
                   when '?' =>
                      Valid_Count := @ +
-                       Search (Rc, Next (Run_C); Map_Index + 1, '.', Run) +
-                         Search (Rc, Next (Run_C); Map_Index + 1, '#', Run + 1);
+                       Search (Rc, Next (Run_C), Map_Index + 1, '.', Run) +
+                         Search (Rc, Next (Run_C), Map_Index + 1, '#', Run + 1);
+                  when others =>
+                     raise Program_Error with "Bad well state after '#'";
                   end case; -- Element (Rc).Condition_Map (Map_Index + 1)
                end if; -- Well = '#' and ...
             when '?' =>
                if Well = '.' then
-                  if (Run_C = No_Element and then Run = 0) or else
-                    Element (Rc).Run_List (Run_C) = Run) then
-                     case Element (Rc).Condition_Map (Map_Index + 1) is
+                  if (Run_C = Run_Lists.No_Element and then Run = 0) or else
+                    Element (Rc).Run_List (Run_C) = Run then
+                     case Element (Element (Rc).Condition_Map, Map_Index + 1) is
                      when '.' =>
                         Valid_Count := @ +
-                          Search (Rc, Next (Run_C); Map_Index + 1, '.', 0);
+                          Search (Rc, Next (Run_C), Map_Index + 1, '.', 0);
                      when '#' =>
                         Valid_Count := @ +
-                          Search (Rc, Next (Run_C); Map_Index + 1, '#', 0);
+                          Search (Rc, Next (Run_C), Map_Index + 1, '#', 0);
                      when '?' =>
                         Valid_Count := @ +
-                          Search (Rc, Next (Run_C); Map_Index + 1, '.', 0) +
-                            Search (Rc, Next (Run_C); Map_Index + 1, '#', 0);
-                     end case; -- Element (Rc).Condition_Map (Map_Index + 1)
-                  end if; -- (Run_C = No_Element and then Run = 0) or else
+                          Search (Rc, Next (Run_C), Map_Index + 1, '.', 0) +
+                            Search (Rc, Next (Run_C), Map_Index + 1, '#', 0);
+                     when others =>
+                        raise Program_Error with "Bad well state after '?', .";
+                     end case; -- Element (Element (Rc).Condition_Map, Map_Index + 1)
+                  end if; -- (Run_C = Run_Lists.No_Element and then Run = 0 ...
                elsif Well = '#' then
-                  if (Run_C /= No_Element and then
+                  if (Run_C /= Run_Lists.No_Element and then
                       Element (Rc).Run_List (Run_C) >= Run + 1) then
-                     case Element (Rc).Condition_Map (Map_Index + 1) is
+                     case Element (Element (Rc).Condition_Map, Map_Index + 1) is
                         when '.' =>
                            Valid_Count := @ +
-                             Search (Rc, Next (Run_C); Map_Index + 1, '.', Run);
+                             Search (Rc, Next (Run_C), Map_Index + 1, '.', Run);
                         when '#' =>
                            Valid_Count := @ +
-                             Search (Rc, Next (Run_C); Map_Index + 1, '#',
+                             Search (Rc, Next (Run_C), Map_Index + 1, '#',
                                      Run + 1);
                         when '?' =>
                            Valid_Count := @ +
-                             Search (Rc, Next (Run_C); Map_Index + 1, '.', Run)
-                               + Search (Rc, Next (Run_C); Map_Index + 1, '#',
+                             Search (Rc, Next (Run_C), Map_Index + 1, '.', Run)
+                               + Search (Rc, Next (Run_C), Map_Index + 1, '#',
                                          Run + 1);
+                     when others =>
+                        raise Program_Error with "Bad well state after '?', #";
                      end case; -- Element (Rc).Condition_Map (Map_Index + 1)
-                  end if; -- (Run_C /= No_Element and then
+                  end if; -- (Run_C /= Run_Lists.No_Element and then ...
                else
                   raise Program_Error with "Bad Well " & Well;
                end if; -- Well = '#'
@@ -191,12 +199,12 @@ procedure December_12 is
                  Element (Element (Rc).Condition_Map,
                           Length(Element (Rc).Condition_Map)) &
                  " at index:" & Map_Index'Img;
-            end case; -- Element (Rc).Condition_Map (Map_Index)
-            end case; -- Element (Rc).Condition_Map (Map_Index)
+            end case; -- Element (Element (Rc).Condition_Map, Map_Index)
          else
             raise Program_Error with "Search beyond end of map, Map_Index:" &
-              Map_Index'Img
+              Map_Index'Img;
          end if; -- Map_Index = Length (Element (Rc).Condition_Map)
+         return Valid_Count;
       end Search;
 
    begin -- Count_Combinations
@@ -204,7 +212,7 @@ procedure December_12 is
                      First (Element(Rc).Run_List), -- First element of Run_List
                      1, -- First element of Condition_Map
                      Element (Element(Rc).Condition_Map, 1), -- First Well
-                     0) -- Initial run length
+                     0); -- Initial run length
    end Count_Combinations;
 
    Report_Store : Report_Stores.List;
