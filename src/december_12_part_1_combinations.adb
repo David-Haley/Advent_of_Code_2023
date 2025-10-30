@@ -133,12 +133,15 @@ procedure December_12_Part_1_Combinations is
    end Count_Permutations;
 
    Report_Store : Report_Stores.List;
+   Result : Natural;
    Sum : Natural := 0;
 
 begin -- December_12_Part_1_Combinations
    Read_input (Report_Store);
    for R in Iterate (Report_Store) loop
-      Sum := @ + Count_Permutations (Element (R));
+      Result := Count_Permutations (Element (R));
+      Put_Line ("Result for " & Element (R).Condition_Map & Result'Img);
+      Sum := @ + Result;
    end loop; -- R in Iterate (Report_Store)
    Put_Line ("Part one:" & Sum'Img);
    DJH.Execution_Time.Put_CPU_Time;
