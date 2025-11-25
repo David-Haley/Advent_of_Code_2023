@@ -8,6 +8,8 @@ with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Ada.Containers; use Ada.Containers;
 with Ada.Containers.Doubly_Linked_Lists;
 with Ada.Containers.Ordered_Maps;
+with Ada.Containers.Synchronized_Queue_Interfaces;
+with Ada.Containers.Unbounded_Synchronized_Queues;
 with DJH.Date_and_Time_Strings; use DJH.Date_and_Time_Strings;
 with DJH.Execution_Time; use DJH.Execution_Time;
 
@@ -30,6 +32,31 @@ procedure December_12 is
    subtype Wells is Character with Static_Predicate => Wells in '.' | '#' | '?';
    subtype Known_Wells is Wells with
      Static_Predicate => Known_Wells in '.' | '#';
+
+   task type Well_Task is
+      entry Finished;
+   end Well_Task;
+
+   subtype Threads is Positive range 1 .. 16;
+   type Well_Task_Arrays is array (Threads) of Well_Task;
+
+   package Queue_Int is new
+     Ada.Containers.Synchronized_Queue_Interfaces (Report_Stores.Cursor);
+   use Queue_Int;
+
+   package To_Do_Lists is new
+     Ada.Containers.Unbounded_Synchronized_Queues (Queue_Int);
+   use To_Do_Lists;
+
+   protected Sum_2 is
+
+      procedure Accumulate (To_Add : in Long_Long_Integer);
+      function Total return Long_Long_Integer;
+
+   private
+      Sum :Long_Long_Integer := 0;
+      Count : Positive := 1;
+   end Sum_2;
 
    procedure Read_input (Report_Store : out Report_Stores.list) is
 
@@ -67,13 +94,13 @@ procedure December_12 is
    end Read_input;
 
    function Count_Combinations (Rc : in Report_Stores.Cursor)
-                                return Natural is
+                                return Long_Long_Integer is
 
       function Search (Rc : in Report_Stores.Cursor;
                        Run_C : in Run_Lists.Cursor;
                        Map_Index : in Positive;
                        Well : in Known_Wells;
-                       Run : in Natural) return Natural
+                       Run : in Natural) return Long_Long_Integer
         with pre =>
           (Well = Element (Element (RC).Condition_Map, Map_index) or
                     Element (Element (RC).Condition_Map, Map_index) = '?') and
@@ -84,12 +111,12 @@ procedure December_12 is
                        Run_C : in Run_Lists.Cursor;
                        Map_Index : in Positive;
                        Well : in Known_Wells;
-                       Run : in Natural) return Natural is
+                       Run : in Natural) return Long_Long_Integer is
 
          -- Search space is constrained to match run list thus reducing the from
          -- 2 ** N where N is the number of wells of unknown state.
 
-         Valid_Count : Natural := 0;
+         Valid_Count : Long_Long_Integer := 0;
 
       begin -- Search
          if Map_Index = Length (Element (Rc).Condition_Map) then
@@ -218,10 +245,40 @@ procedure December_12 is
       end loop; -- Rc in Iterate (Report_Store)
    end Unfold;
 
+   To_Do_List : To_Do_Lists.Queue;
+
+   task body Well_Task is
+
+      Rc : Report_Stores.Cursor;
+      Result : Long_Long_Integer;
+
+   begin -- Well_Task
+      loop -- process one line of map
+         To_Do_List.Dequeue (Rc);
+         exit when Rc = Report_Stores.No_Element;
+         Result := Count_Combinations (Rc);
+         Sum_2.Accumulate (Result);
+      end loop; -- process one line of map
+      accept Finished;
+   end Well_Task;
+
+   protected body Sum_2 is
+
+      procedure Accumulate (To_Add : in Long_Long_Integer) is
+
+      begin -- Accumulate
+         Sum := @ + To_Add;
+         Count := @ + 1;
+         Put_Line ("Processed:" & ' ' & Time_String & Count'Img & To_Add'Img);
+      end Accumulate;
+
+      function Total return Long_Long_Integer is (Sum);
+
+   end Sum_2;
+
    Report_Store, Report_Store_Two : Report_Stores.List;
-   Sum : Natural := 0;
-   Sum_two : Long_Long_Integer := 0;
-   Count : Natural := 0;
+   Sum : Long_Long_Integer := 0;
+   Well_Task_Array : Well_Task_Arrays;
 
 begin -- December_12
    Read_input (Report_Store);
@@ -232,10 +289,16 @@ begin -- December_12
    DJH.Execution_Time.Put_CPU_Time;
    Unfold (Report_Store, Report_Store_Two);
    for R in Iterate (Report_Store_Two) loop
-      Sum_Two := @ + Long_Long_integer (Count_Combinations (R));
-      Count := @ + 1;
-      Put_Line ("Processed:" & ' ' & Time_String & Count'Img & Sum_Two'Img);
+      To_Do_List.Enqueue (R);
    end loop; -- R in Iterate (Report_Store_Two)
-   Put_Line ("Part two:" & Sum_two'Img);
+   for T in Threads loop
+      To_Do_List.Enqueue (Report_Stores.No_Element);
+   end loop; -- T in Threads
+   -- Ensure all tasks will finish
+   for T in Threads loop
+      Well_Task_Array (T).Finished;
+   end loop; -- T in Threads
+   -- Wait for all tasks to finish before reading result
+   Put_Line ("Part two:" & Sum_2.Total'Img);
    DJH.Execution_Time.Put_CPU_Time;
 end December_12;
