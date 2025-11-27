@@ -11,7 +11,7 @@ project Advent_Of_Code is
    end Builder;
 
    package Compiler is
-      for Switches ("ada") use ("-g", "-gnat2020");
+      for Switches ("ada") use ("-g", "-gnat2022", "-gnato");
    end Compiler;
 
    package Linker is

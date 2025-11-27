@@ -2,227 +2,241 @@ with Ada.Text_IO; use Ada.Text_IO;
 with Ada.Command_Line; use Ada.Command_Line;
 with Ada.Text_IO.Unbounded_IO; use Ada.Text_IO.Unbounded_IO;
 with Ada.Strings; use Ada.Strings;
-with Ada.Strings.Maps; use Ada.Strings.Maps;
 with Ada.Strings.Maps.Constants; use Ada.Strings.Maps.Constants;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
-with Ada.Containers; use Ada.Containers;
-with Ada.Containers.Doubly_Linked_Lists;
 with Ada.Containers.Ordered_Maps;
-with Ada.Containers.Synchronized_Queue_Interfaces;
-with Ada.Containers.Unbounded_Synchronized_Queues;
-with DJH.Date_and_Time_Strings; use DJH.Date_and_Time_Strings;
+with Ada.Containers.Vectors;
 with DJH.Execution_Time; use DJH.Execution_Time;
 
 procedure December_12 is
 
-   package Run_Lists is new Ada.Containers.Doubly_Linked_Lists (Positive);
+   type Run_Indices is new Positive;
+   package Run_Lists is new Ada.Containers.Vectors (Run_Indices, Positive);
    use Run_Lists;
-
-   subtype Condition_Maps is Unbounded_String;
-
-   type Condition_Reports is record
-      Condition_Map : Condition_Maps;
-      Run_List : Run_Lists.List;
-   end record; -- Condition_Reports
-
-   package Report_Stores is new
-     Ada.Containers.Doubly_Linked_Lists (Condition_Reports);
-   use Report_Stores;
 
    subtype Wells is Character with Static_Predicate => Wells in '.' | '#' | '?';
    subtype Known_Wells is Wells with
      Static_Predicate => Known_Wells in '.' | '#';
 
-   task type Well_Task is
-      entry Finished;
-   end Well_Task;
+   type Map_Indices is new Positive;
+   package Condition_Maps is new Ada.Containers.Vectors (Map_Indices, Wells);
+   use Condition_Maps;
 
-   subtype Threads is Positive range 1 .. 16;
-   type Well_Task_Arrays is array (Threads) of Well_Task;
+   type Condition_Reports is record
+      Condition_Map : Condition_Maps.Vector := Condition_Maps.Empty_Vector;
+      Run_List : Run_Lists.Vector := Run_Lists.Empty_Vector;
+   end record; -- Condition_Reports
 
-   package Queue_Int is new
-     Ada.Containers.Synchronized_Queue_Interfaces (Report_Stores.Cursor);
-   use Queue_Int;
+   package Report_Stores is new
+     Ada.Containers.Vectors (Positive, Condition_Reports);
+   use Report_Stores;
 
-   package To_Do_Lists is new
-     Ada.Containers.Unbounded_Synchronized_Queues (Queue_Int);
-   use To_Do_Lists;
+   subtype Runs is Natural;
 
-   protected Sum_2 is
+   type Cache_Keys is record
+      Well : Known_Wells; -- well value to be tested at current level.
+      Map_Index : Map_Indices; -- current map element being considered
+      Run_Index : Run_Indices; -- current element of run list being considered
+      Run : Runs; -- current length of failed wells
+   end record; -- Cache_Keys
 
-      procedure Accumulate (To_Add : in Long_Long_Integer);
-      function Total return Long_Long_Integer;
+   function "<" (Left, Right : Cache_Keys) return Boolean is
+     (Left.Well < Right.Well or else
+        (Left.Well = Right.Well and then (Left.Map_Index < Right.Map_Index
+         or else (Left.Map_Index = Right.Map_Index and then
+               (Left.Run_Index < Right.Run_Index
+                or else (Left.Run_Index = Right.Run_Index and then
+                  Left.Run < Right.Run))))));
 
-   private
-      Sum :Long_Long_Integer := 0;
-      Count : Positive := 1;
-   end Sum_2;
+   subtype Big_Natural is Long_Long_Integer range 0 .. Long_Long_Integer'Last;
 
-   procedure Read_input (Report_Store : out Report_Stores.list) is
+   package Caches is new Ada.Containers.Ordered_Maps (Cache_Keys, Big_Natural);
+   use Caches;
+
+   procedure Read_input (Report_Store : out Report_Stores.Vector) is
 
       Input_File : File_Type;
       Text : Unbounded_String;
       Start_At, First : Positive;
       Last : Natural;
-      Spring_Set : constant Character_Set := To_Set (".#?");
       Condition_Report : Condition_Reports;
 
    begin -- Read_input
       if Argument_Count = 0 then
          Open (Input_File, In_File, "december_12.txt");
       else
-         Open (Input_File, In_File, Argument(1));
+         Open (Input_File, In_File, Argument (1));
       end if; -- Argument_Count = 0
       Clear (Report_Store);
       while not End_Of_File (Input_File) loop
+         Clear (Condition_Report.Condition_Map);
          Clear (Condition_Report.Run_List);
          Get_Line (Input_File, Text);
          Start_At := 1;
-         Find_Token (Text, Spring_Set, Start_At, inside, First, Last);
-         Condition_Report.Condition_Map := Unbounded_Slice (Text, First, Last);
-         Start_At := Last + 1;
+         while Element (Text, Start_At) in Wells loop
+            Append (Condition_Report.Condition_Map, Element (Text, Start_At));
+            Start_At := @ + 1;
+         end loop; -- Element (Text, Start_At) in Wells
          loop -- read one data item
-            Find_Token (Text, Decimal_Digit_Set, Start_At, inside, First, Last);
+            Find_Token (Text, Decimal_Digit_Set, Start_At, Inside, First, Last);
             Append (Condition_Report.Run_List,
                     Positive'Value (Slice (Text, First, Last)));
             Start_At := Last + 1;
-            exit when Last = 0  or Start_At > Length (Text);
+            exit when Last = 0  or else Start_At > Length (Text);
          end loop; -- read one data item
          Append (Report_Store, Condition_Report);
       end loop; -- not End_Of_File (Input_File)
       Close (Input_File);
    end Read_input;
 
-   function Count_Combinations (Rc : in Report_Stores.Cursor)
-                                return Long_Long_Integer is
+   function Count_Combinations (Condition_Report : Condition_Reports)
+                                return Big_Natural is
 
-      function Search (Rc : in Report_Stores.Cursor;
-                       Run_C : in Run_Lists.Cursor;
-                       Map_Index : in Positive;
-                       Well : in Known_Wells;
-                       Run : in Natural) return Long_Long_Integer
+      function Search (Condition_Report : Condition_Reports;
+                       Run_Index : Run_Indices;
+                       Map_Index : Map_Indices;
+                       Well : Known_Wells;
+                       Run : Natural;
+                       Cache : in out Caches.Map) return Big_Natural
         with pre =>
-          (Well = Element (Element (RC).Condition_Map, Map_index) or
-                    Element (Element (RC).Condition_Map, Map_index) = '?') and
-                  Map_index <= Length (Element (RC).Condition_Map);
+          Map_Index <= Last_Index (Condition_Report.Condition_Map) and then
+             (Well = Condition_Report.Condition_Map (Map_Index) or else
+                  Condition_Report.Condition_Map (Map_Index) = '?');
 
-
-      function Search (Rc : in Report_Stores.Cursor;
-                       Run_C : in Run_Lists.Cursor;
-                       Map_Index : in Positive;
-                       Well : in Known_Wells;
-                       Run : in Natural) return Long_Long_Integer is
+      function Search (Condition_Report : Condition_Reports;
+                       Run_Index : Run_Indices;
+                       Map_Index : Map_Indices;
+                       Well : Known_Wells;
+                       Run : Natural;
+                       Cache : in out Caches.Map) return Big_Natural is
 
          -- Search space is constrained to match run list thus reducing the from
          -- 2 ** N where N is the number of wells of unknown state.
 
-         Valid_Count : Long_Long_Integer := 0;
+         Valid_Count : Big_Natural := 0;
+         Cache_Key : constant Cache_Keys := (Well, Map_Index, Run_Index, Run);
 
       begin -- Search
-         if Map_Index = Length (Element (Rc).Condition_Map) then
+         if Contains (Cache, Cache_Key) then
+            return Cache (Cache_Key);
+         end if; -- Contains (Cache, Cache_Key)
+         if Map_Index = Last_Index (Condition_Report.Condition_Map) then
             case Well is
             when '.' =>
-               if Run_C = Run_lists.No_Element and Run = 0 then
+               if Run_Index > Last_Index (Condition_Report.Run_List) and then
+                 Run = 0 then
                   Valid_Count := 1;
-               end if; -- Well = '.' and ...
+               end if; -- Run_Index > Last_Index (Condition_Report.Run_list) ...
             when '#' =>
-               if (Run_C /= Run_Lists.No_Element and
-                     Next (Run_C) = Run_Lists.No_Element) and then
-                 Element (Run_C) = Run then
+               if Run_Index = Last_Index (Condition_Report.Run_List) and then
+                 Condition_Report.Run_List (Run_Index) = Run then
                   Valid_Count := 1;
-               end if; -- (Run_C = Last (Element (Rc).Run_List) and then ...
+               end if; -- Run_Index = Last (Condition_Report.Run_List) ...
             end case; -- Well
          else
             case Well is
             when '.' =>
-               --  Put_Line ("More map to process good well");
                if Run = 0 then
                   -- should always be true
-                  case Element (Element (Rc).Condition_Map, Map_Index + 1) is
+                  case Condition_Report.Condition_Map (Map_Index + 1) is
                   when '.' =>
                      Valid_Count := @ +
-                       Search (Rc, Run_C, Map_Index + 1, '.', 0);
+                       Search (Condition_Report, Run_Index, Map_Index + 1,
+                               '.', 0, Cache);
                   when '#' =>
                      Valid_Count := @ +
-                       Search (Rc, Run_C, Map_Index + 1, '#', 1);
+                       Search (Condition_Report, Run_Index, Map_Index + 1,
+                               '#', 1, Cache);
                   when '?' =>
                      Valid_Count := @ +
-                       Search (Rc, Run_C, Map_Index + 1, '.', 0) +
-                       Search (Rc, Run_C, Map_Index + 1, '#', 1);
+                       Search (Condition_Report, Run_Index, Map_Index + 1,
+                               '.', 0, Cache) +
+                       Search (Condition_Report, Run_Index, Map_Index + 1,
+                               '#', 1, Cache);
                   when others =>
                      raise Program_Error with "Bad well state after '.'" &
-                       Element (Element (Rc).Condition_Map, Map_Index + 1) &
+                       Condition_Report.Condition_Map (Map_Index + 1) &
                        "'";
-                  end case; -- Element (Element (Rc).Condition_Map, Map_Index + 1)
-               end if; -- Well = '.' and Run = 0
+                  end case; -- Condition_Report.Condition_Map (Map_Index + 1)
+               end if; -- Run = 0
             when '#' =>
-               --  Put_Line ("More map to process bad well");
-               if (Run_C /= Run_Lists.No_Element and then
-                   Element (Run_C) >= Run) then
-                  case Element (Element (Rc).Condition_Map, Map_Index + 1) is
+               if Run_Index <= Last_Index (Condition_Report.Run_List) and then
+                 Condition_Report.Run_List (Run_Index) >= Run then
+                  case Condition_Report.Condition_Map (Map_Index + 1) is
                   when '.' =>
-                     if Run = Element (Run_C) then
+                     if Run = Condition_Report.Run_List (Run_Index) then
                         Valid_Count := @ +
-                          Search (Rc, Next (Run_C), Map_Index + 1, '.', 0);
-                     end if; -- Run = Element (Run_C)
+                          Search (Condition_Report, Run_Index + 1,
+                                  Map_Index + 1, '.', 0, Cache);
+                     end if; -- Run = Condition_Report.Run_List (Run_Index)
                   when '#' =>
                      Valid_Count := @ +
-                       Search (Rc, Run_C, Map_Index + 1, '#', Run + 1);
+                       Search (Condition_Report, Run_Index, Map_Index + 1,
+                               '#', Run + 1, Cache);
                   when '?' =>
-                     if Run = Element (Run_C) then
+                     if Run = Condition_Report.Run_List (Run_Index) then
                         Valid_Count := @ +
-                          Search (Rc, Next (Run_C), Map_Index + 1, '.', 0);
-                     end if; -- Run = Element (Run_C)
+                          Search (Condition_Report, Run_Index + 1,
+                                  Map_Index + 1, '.', 0, Cache);
+                     end if; -- Run = Condition_Report.Run_List (Run_Index)
                      Valid_Count := @ +
-                         Search (Rc, Run_C, Map_Index + 1, '#', Run + 1);
+                       Search (Condition_Report, Run_Index, Map_Index + 1,
+                               '#', Run + 1, Cache);
                   when others =>
                      raise Program_Error with "Bad well state after '#'" &
-                       Element (Element (Rc).Condition_Map, Map_Index + 1) &
-                       "'";
-                  end case; -- Element (Element (Rc).Condition_Map, Map_Index + 1)
-               end if; --  (Run_C /= Run_Lists.No_Element and then
+                       Condition_Report.Condition_Map (Map_Index + 1) & "'";
+                  end case; -- Condition_Report.Condition_Map (Map_Index + 1)
+               end if; -- Run_Index <= last_Index (Condition_Report.Run_List ...
             end case; -- Well
-         end if; -- Map_Index = Length (Element (Rc).Condition_Map)
+         end if; -- Map_Index = Last_Index (Condition_Report.Condition_Map)
+         Include (Cache, Cache_Key, Valid_Count);
          return Valid_Count;
       end Search;
 
+      Cache : Caches.Map;
+
    begin -- Count_Combinations
-      case Element (Element(Rc).Condition_Map, 1) is
+      Clear (Cache);
+      case Condition_Report.Condition_Map (1) is
          when '.' =>
-            return Search (Rc,
-                           First (Element(Rc).Run_List),
+            return Search (Condition_Report,
+                           First_Index (Condition_Report.Run_List),
                            -- First element of Run_List
                            1, -- First index of Condition_Map
                            '.', -- First Well (unknown try good)
-                           0); -- Initial run length
+                           0,
+                           Cache); -- Initial run length
          when '#' =>
-            return Search (Rc,
-                           First (Element(Rc).Run_List),
+            return Search (Condition_Report,
+                           First_Index (Condition_Report.Run_List),
                            -- First element of Run_List
                            1, -- First index of Condition_Map
                            '#', -- First Well unknowmn try bad
-                           1); -- Initial run length
+                           1,
+                           Cache); -- Initial run length
          when '?' =>
-            return Search (Rc,
-                           First (Element(Rc).Run_List),
+            return Search (Condition_Report,
+                           First_Index (Condition_Report.Run_List),
                            -- First element of Run_List
                            1, -- First index of Condition_Map
                            '.', -- First Well (unknown try good)
-                           0) -- Initial run length
-              + Search (Rc,
-                        First (Element(Rc).Run_List),
+                           0,
+                           Cache) -- Initial run length
+              + Search (Condition_Report,
+                        First_Index (Condition_Report.Run_List),
                         -- First element of Run_List
                         1, -- First index of Condition_Map
                         '#', -- First Well unknowmn try bad
-                        1); -- Initial run length
+                        1,
+                        Cache); -- Initial run length
          when others =>
             raise Program_Error with "Bad first well in map '" &
-              Element (Element(Rc).Condition_Map, 1) & "'";
-      end case; -- Element (Element(Rc).Condition_Map, 1)
+              Condition_Report.Condition_Map (1) & "'";
+      end case; -- Element(Condition_Report).Condition_Map (1)
    end Count_Combinations;
 
-   procedure Unfold (Report_Store : in Report_Stores.List;
-                     Report_Store_Two : out Report_Stores.List) is
+   procedure Unfold (Report_Store : in Report_Stores.Vector;
+                     Report_Store_Two : out Report_Stores.Vector) is
 
       Repeats : constant Positive := 5;
       Condition_Report : Condition_Reports;
@@ -230,7 +244,7 @@ procedure December_12 is
    begin -- Unfold
       Clear (Report_Store_Two);
       for Rc in Iterate (Report_Store) loop
-         Condition_Report.Condition_Map := Null_Unbounded_String;
+         Clear (Condition_Report.Condition_Map);
          Clear (Condition_Report.Run_List);
          for F in Positive range 1 .. Repeats loop
             Append (Condition_Report.Condition_Map, Element (Rc).Condition_Map);
@@ -245,60 +259,21 @@ procedure December_12 is
       end loop; -- Rc in Iterate (Report_Store)
    end Unfold;
 
-   To_Do_List : To_Do_Lists.Queue;
-
-   task body Well_Task is
-
-      Rc : Report_Stores.Cursor;
-      Result : Long_Long_Integer;
-
-   begin -- Well_Task
-      loop -- process one line of map
-         To_Do_List.Dequeue (Rc);
-         exit when Rc = Report_Stores.No_Element;
-         Result := Count_Combinations (Rc);
-         Sum_2.Accumulate (Result);
-      end loop; -- process one line of map
-      accept Finished;
-   end Well_Task;
-
-   protected body Sum_2 is
-
-      procedure Accumulate (To_Add : in Long_Long_Integer) is
-
-      begin -- Accumulate
-         Sum := @ + To_Add;
-         Count := @ + 1;
-         Put_Line ("Processed:" & ' ' & Time_String & Count'Img & To_Add'Img);
-      end Accumulate;
-
-      function Total return Long_Long_Integer is (Sum);
-
-   end Sum_2;
-
-   Report_Store, Report_Store_Two : Report_Stores.List;
-   Sum : Long_Long_Integer := 0;
-   Well_Task_Array : Well_Task_Arrays;
+   Report_Store, Report_Store_Two : Report_Stores.Vector;
+   Sum : Big_Natural := 0;
 
 begin -- December_12
    Read_input (Report_Store);
    for R in Iterate (Report_Store) loop
-      Sum := @ + Count_Combinations (R);
+      Sum := @ + Count_Combinations (Element (R));
    end loop; -- R in Iterate (Report_Store)
    Put_Line ("Part one:" & Sum'Img);
-   DJH.Execution_Time.Put_CPU_Time;
+   Put_CPU_Time;
+   Sum := 0;
    Unfold (Report_Store, Report_Store_Two);
    for R in Iterate (Report_Store_Two) loop
-      To_Do_List.Enqueue (R);
-   end loop; -- R in Iterate (Report_Store_Two)
-   for T in Threads loop
-      To_Do_List.Enqueue (Report_Stores.No_Element);
-   end loop; -- T in Threads
-   -- Ensure all tasks will finish
-   for T in Threads loop
-      Well_Task_Array (T).Finished;
-   end loop; -- T in Threads
-   -- Wait for all tasks to finish before reading result
-   Put_Line ("Part two:" & Sum_2.Total'Img);
-   DJH.Execution_Time.Put_CPU_Time;
+      Sum := @ + Count_Combinations (Element (R));
+   end loop; -- R in Iterate (Report_Store)
+   Put_Line ("Part two:" & Sum'Img);
+   Put_CPU_Time;
 end December_12;

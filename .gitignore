@@ -9,3 +9,7 @@ obj/
 
 # Project file
 *.xml
+/obj/
+/bin/
+/alire/
+/config/
